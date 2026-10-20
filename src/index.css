@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-suredocs-blue: #3478c8;
+  --color-suredocs-blue-hover: #2868b2;
+  --color-suredocs-ink: #101b2b;
+  --color-suredocs-secondary: #627284;
+  --color-suredocs-muted: #778596;
+  --color-suredocs-placeholder: #9aa5b1;
+  --color-suredocs-border: #d4dce5;
+}
+
+:root {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #101b2b;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  background: #f1f6fc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.login-backdrop {
+  background:
+    radial-gradient(ellipse at 0% 100%, rgba(255, 240, 244, 0.5), transparent 37%),
+    radial-gradient(ellipse at 100% 0%, rgba(222, 237, 255, 0.58), transparent 45%),
+    #f1f6fc;
+}
