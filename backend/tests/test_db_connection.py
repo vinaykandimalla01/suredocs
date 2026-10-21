@@ -1,5 +1,6 @@
 from sqlalchemy import text
 
+from app.core.config import DB_NAME, DB_USERNAME
 from app.db.session import engine
 
 
@@ -11,5 +12,5 @@ def test_postgres_connection():
 
         database_name, database_user = result.one()
 
-    assert database_name == "suredocs"
-    assert database_user == "suredocs_app"
+    assert database_name == DB_NAME
+    assert database_user == DB_USERNAME

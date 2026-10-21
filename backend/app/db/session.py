@@ -1,40 +1,29 @@
-from pathlib import Path
+"""
+SQLAlchemy engine and session factory.
+
+Reads database credentials from the central config module,
+which loads them from the secrets directory.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-
-# Resolve the SureDocs project root.
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-
-# Read the application password from the secrets directory.
-PASSWORD_FILE = (
-    PROJECT_ROOT / "secrets" / "suredocs_app_password.txt"
-)
-
-if not PASSWORD_FILE.is_file():
-    raise FileNotFoundError(
-        f"Database password file not found: {PASSWORD_FILE}"
-    )
-
-DB_PASSWORD = PASSWORD_FILE.read_text(
-    encoding="utf-8"
-).strip()
-
-if not DB_PASSWORD:
-    raise RuntimeError("The database password file is empty.")
-
+from app.core.config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USERNAME
 
 # Build the connection URL safely, including special characters
 # in the database password.
 DATABASE_URL = URL.create(
     drivername="postgresql+psycopg",
-    username="suredocs_app",
+    username=DB_USERNAME,
     password=DB_PASSWORD,
-    host="127.0.0.1",
-    port=5432,
-    database="suredocs",
+    host=DB_HOST,
+    port=DB_PORT,
+    database=DB_NAME,
 )
 
 # Create the SQLAlchemy engine.
@@ -50,6 +39,16 @@ SessionLocal = sessionmaker(
     expire_on_commit=False,
 )
 
-# Base class for future SQLAlchemy models.
+
+# Base class for all SQLAlchemy models.
 class Base(DeclarativeBase):
     pass
+
+
+def get_db() -> Generator[Session, None, None]:
+    """FastAPI dependency that yields a database session and closes it after use."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
