@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import AdminDashboard from './AdminDashboard.jsx'
+import EmployeeDashboard from './EmployeeDashboard.jsx'
 import illustration from './assets/collaboration-illustration.svg'
 
 function ShieldMark({ className = '' }) {
@@ -221,6 +222,9 @@ function LoginForm() {
 function App() {
   if (window.location.pathname.startsWith('/admin')) {
     return <AdminDashboard />
+  }
+  if (window.location.pathname.startsWith('/employee')) {
+    return <EmployeeDashboard />
   }
 
   return (

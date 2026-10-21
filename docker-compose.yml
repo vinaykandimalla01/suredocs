@@ -1,0 +1,77 @@
+
+name: suredocs
+
+services:
+  db:
+    image: postgres:18.6-bookworm
+    restart: unless-stopped
+    shm_size: 256mb
+    stop_grace_period: 1m
+
+    environment:
+      POSTGRES_DB: suredocs
+      POSTGRES_USER: suredocs_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+
+    secrets:
+      - postgres_password
+
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    security_opt:
+      - no-new-privileges:true
+
+  pgadmin:
+    image: dpage/pgadmin4:9.18.0
+    restart: unless-stopped
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: vinay.cse01@gmail.com
+      PGADMIN_DEFAULT_PASSWORD_FILE: /run/secrets/pgadmin_password
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "True"
+      PGADMIN_DISABLE_POSTFIX: "1"
+      PGADMIN_LISTEN_PORT: "8080"
+
+    secrets:
+      - pgadmin_password
+
+    ports:
+      - "5050:8080"
+
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+    security_opt:
+      - no-new-privileges:true
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    name: suredocs_postgres18_data
+
+  pgadmin_data:
+    name: suredocs_pgadmin_data
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+
+  pgadmin_password:
+    file: ./secrets/pgadmin_password.txt
