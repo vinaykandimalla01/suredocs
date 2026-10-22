@@ -1,88 +1,24 @@
 import { useEffect, useState } from 'react'
+import { apiGet, apiPost } from './api.js'
 import AdminDashboard from './AdminDashboard.jsx'
 import EmployeeDashboard from './EmployeeDashboard.jsx'
-import illustration from './assets/collaboration-illustration.svg'
 
-function ShieldMark({ className = '' }) {
+function BrandMark() {
   return (
     <svg
       aria-hidden="true"
-      className={className}
       fill="none"
-      viewBox="0 0 40 44"
+      className="login-brand-mark"
+      viewBox="0 0 20 22"
     >
       <path
-        d="M20 2.5 36 8v12.2c0 9.4-6.2 16.8-16 21.3C10.2 37 4 29.6 4 20.2V8l16-5.5Z"
+        d="M3 1.5h9.5L17 6v14.5H3z"
         stroke="currentColor"
-        strokeWidth="3"
+        strokeWidth="1.4"
       />
       <path
-        d="M14 13h6.2c5.1 0 8.1 2.9 8.1 7.3 0 4.5-3 7.4-8.1 7.4H14V13Zm5.8 10.4c2.2 0 3.5-1.1 3.5-3.1s-1.3-3.1-3.5-3.1h-1v6.2h1Z"
+        d="m12.2 4.2 1.6 1.6h-1.6zM9.7 8.1 7 9.2v2.1c0 1.7 1.1 2.8 2.7 3.5 1.6-.7 2.7-1.8 2.7-3.5V9.2L9.7 8.1Z"
         fill="currentColor"
-      />
-    </svg>
-  )
-}
-
-function BrandName({ compact = false }) {
-  return (
-    <span className="inline-flex items-center gap-2.5">
-      <ShieldMark
-        className={compact ? 'h-8 w-7 text-suredocs-blue' : 'h-14 w-12 text-suredocs-blue'}
-      />
-      <span
-        className={
-          compact
-            ? 'text-[25px] font-bold tracking-[-1.1px] text-suredocs-ink'
-            : 'text-5xl font-bold tracking-[-2.5px] text-suredocs-ink sm:text-6xl'
-        }
-      >
-        SureDocs
-      </span>
-    </span>
-  )
-}
-
-function EmailIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
-      <rect
-        height="14"
-        rx="2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        width="18"
-        x="3"
-        y="5"
-      />
-      <path
-        d="m3 7 9 5 9-5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
-
-function LockIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
-      <rect
-        height="10"
-        rx="2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        width="15"
-        x="4.5"
-        y="10"
-      />
-      <path
-        d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v2"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
       />
     </svg>
   )
@@ -90,26 +26,26 @@ function LockIcon() {
 
 function EyeIcon() {
   return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+    <svg aria-hidden="true" className="login-eye-icon" fill="none" viewBox="0 0 24 24">
       <path
-        d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"
+        d="M2.5 12s3.3-6.2 9.5-6.2 9.5 6.2 9.5 6.2-3.3 6.2-9.5 6.2S2.5 12 2.5 12Z"
         stroke="currentColor"
-        strokeWidth="1.8"
+        strokeWidth="1.5"
       />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.5" />
     </svg>
   )
 }
 
 function EyeOffIcon() {
   return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+    <svg aria-hidden="true" className="login-eye-icon" fill="none" viewBox="0 0 24 24">
       <path
-        d="m3 3 18 18M10.5 10.7a3 3 0 0 0 4.2 4.2M7.4 7.4C4.6 9.2 3 12 3 12s3.5 7 9 7c2 0 3.7-.6 5.2-1.6m-2-2.4A9.8 9.8 0 0 0 21 12s-3.5-7-9-7c-1 0-1.9.2-2.8.5"
+        d="m3 3 18 18M10.7 10.7a2 2 0 0 0 2.6 2.6M7.2 7.4C4.5 9.1 3 12 3 12s3.3 6.2 9 6.2c2 0 3.7-.7 5.2-1.7m-2.1-2.1A9.9 9.9 0 0 0 21 12s-3.3-6.2-9-6.2c-1 0-1.9.2-2.8.5"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="1.8"
+        strokeWidth="1.5"
       />
     </svg>
   )
@@ -119,7 +55,7 @@ function SpinnerIcon() {
   return (
     <svg
       aria-hidden="true"
-      className="h-5 w-5 animate-spin"
+      className="login-spinner"
       fill="none"
       viewBox="0 0 24 24"
     >
@@ -140,37 +76,31 @@ function SpinnerIcon() {
   )
 }
 
-function LoginField({ id, label, type, placeholder, value, onChange, error, icon, trailing }) {
+function LoginField({ id, label, type, placeholder, value, onChange, error, trailing }) {
   return (
-    <div>
-      <label
-        className="mb-2 block text-sm font-semibold text-suredocs-ink"
-        htmlFor={id}
-      >
+    <div className="login-field">
+      <label className="login-field-label" htmlFor={id}>
         {label}
       </label>
       <div
-        className={`flex h-[50px] items-center gap-3 rounded-[10px] border bg-white px-4 transition focus-within:border-suredocs-blue focus-within:ring-2 focus-within:ring-blue-100 ${
-          error ? 'border-red-400' : 'border-suredocs-border'
-        }`}
+        className={`login-input-wrap${error ? ' has-error' : ''}`}
       >
-        <span className="shrink-0 text-suredocs-muted">{icon}</span>
         <input
           aria-describedby={error ? `${id}-error` : undefined}
           aria-invalid={Boolean(error)}
           aria-required="true"
           autoComplete={id === 'email' ? 'email' : 'current-password'}
-          className="h-full min-w-0 flex-1 bg-transparent text-[15px] text-suredocs-ink outline-none placeholder:text-suredocs-placeholder"
+          className="login-input"
           id={id}
           onChange={onChange}
           placeholder={placeholder}
           type={type}
           value={value}
         />
-        {trailing && <span className="shrink-0">{trailing}</span>}
+        {trailing}
       </div>
       {error && (
-        <p className="mt-1.5 text-xs text-red-600" id={`${id}-error`}>
+        <p className="login-field-error" id={`${id}-error`}>
           {error}
         </p>
       )}
@@ -180,20 +110,104 @@ function LoginField({ id, label, type, placeholder, value, onChange, error, icon
 
 function BrandingSection() {
   return (
-    <section className="flex flex-col items-center justify-center px-6 py-8 text-center lg:min-h-screen lg:w-[58%] lg:px-10 lg:py-12">
-      <img
-        alt="People collaborating to share folders and documents"
-        className="mb-2 w-full max-w-[455px]"
-        src={illustration}
-      />
-      <BrandName />
-      <p className="mt-2 text-[17px] font-bold tracking-[0.025em] text-suredocs-ink sm:text-[19px]">
-        SECURE. COLLABORATE. SHARE.
-      </p>
-      <p className="mt-1 text-[17px] text-suredocs-secondary sm:text-[20px]">
-        Your Enterprise Document Solution
-      </p>
+    <section className="login-brand-panel">
+      <header className="login-brand-header">
+        <div className="login-brand-name">
+          <BrandMark />
+          <span>SureDocs</span>
+        </div>
+        <span className="login-micro-label">WORKSPACE / SIGN IN</span>
+      </header>
+      <div className="login-illustration-wrap">
+        <AccessIllustration />
+      </div>
+      <div className="login-brand-copy">
+        <div className="login-eyebrow">
+          <span />SECURE DOCUMENT WORKSPACE
+        </div>
+        <h2>
+          Confidentiality, <span>built into<br className="login-desktop-break" /> every document.</span>
+        </h2>
+        <p>
+          One secure workspace for the documents your<br className="login-desktop-break" /> organization depends on.
+        </p>
+      </div>
+      <div className="login-features">
+        <div><span className="login-feature-number">01</span><strong>Controlled access</strong></div>
+        <div><span className="login-feature-number">02</span><strong>Document-level permissions</strong></div>
+        <div><span className="login-feature-number">03</span><strong>Auditable activity</strong></div>
+      </div>
     </section>
+  )
+}
+
+function AccessIllustration() {
+  return (
+    <svg
+      aria-label="Layered documents with access permissions and audit activity"
+      className="login-illustration"
+      role="img"
+      viewBox="0 0 300 220"
+      fill="none"
+    >
+      <g stroke="#e6e2dc" strokeWidth=".7" strokeDasharray="1 2">
+        <path d="M15 57h270M15 150h270M46 10v196M254 10v196" />
+        <path
+          d="M24 26h22M24 26v22M276 26h-22M276 26v22M24 194h22M24 194v-22M276 194h-22M276 194v-22"
+          stroke="#777f85"
+          strokeWidth="1"
+          strokeDasharray="none"
+        />
+      </g>
+      <g stroke="#d4d0c9" strokeWidth=".9">
+        <path d="M103 43h81l15 15v121h-96z" fill="#f4f2ee" />
+        <path d="M184 43v15h15" />
+        <path d="M87 57h81l15 15v120H87z" fill="#f7f5f1" />
+        <path d="M168 57v15h15" />
+      </g>
+      <g stroke="#535961" strokeWidth="1">
+        <path d="M51 74h83l14 14v108H51z" fill="#fff" />
+        <path d="M134 74v14h14" />
+      </g>
+      <circle cx="51" cy="74" r="4.4" fill="#151a20" />
+      <path d="M49.2 74h3.6M51 72.2v3.6" stroke="#fff" strokeWidth=".7" />
+      <g fill="#78899a" fontFamily="monospace" fontSize="4.8" letterSpacing=".6">
+        <text x="59" y="87">CONFIDENTIAL</text>
+        <text x="211" y="94">ACCESS · 3 MEMBERS</text>
+        <text x="211" y="174">AUDIT LOG · 04:18 UTC</text>
+        <text x="59" y="181">SD-0212 · FILE 3</text>
+        <text x="41" y="214">FIG. 01 — ACCESS MODEL</text>
+      </g>
+      <g stroke="#dedbd5" strokeWidth=".8">
+        <path d="M59 109h69M59 115h58M59 133h69M59 139h57M59 157h69M59 163h58" />
+      </g>
+      <g fill="#161a1e">
+        <path d="M59 96h47v3.5H59zM59 126h35v3.5H59zM59 150h51v3.5H59z" />
+      </g>
+      <path d="M148 108h58m0 0v-7h4m-62 7v25h58m0 0v-4h4" stroke="#3150d2" strokeWidth=".9" />
+      <path d="M148 133h58m0 0v26h4" stroke="#7b838c" strokeWidth=".8" />
+      <circle cx="148" cy="108" r="1.6" fill="#3150d2" />
+      <circle cx="148" cy="133" r="1.4" fill="#6f7881" />
+      <g>
+        <rect x="210" y="95" width="56" height="14" rx="1.2" fill="#fff" stroke="#3150d2" strokeWidth=".9" />
+        <circle cx="217" cy="102" r="3" fill="#3150d2" />
+        <path d="m215.7 102 1 1 1.8-2" stroke="#fff" strokeWidth=".6" />
+        <text x="223" y="104" fill="#2946c5" fontFamily="monospace" fontSize="5.4">Owner</text>
+        <rect x="210" y="121" width="56" height="14" rx="1.2" fill="#fff" stroke="#8f9499" strokeWidth=".8" />
+        <circle cx="217" cy="128" r="3" stroke="#646e78" strokeWidth=".8" />
+        <path d="M216 128h2m-1-1v2" stroke="#646e78" strokeWidth=".6" />
+        <text x="223" y="130" fill="#323940" fontFamily="monospace" fontSize="5.4">Can edit</text>
+        <rect x="210" y="147" width="56" height="14" rx="1.2" fill="#f6f5f2" stroke="#d7d3cd" strokeWidth=".8" />
+        <circle cx="217" cy="154" r="3" stroke="#a8a9a7" strokeWidth=".8" />
+        <text x="223" y="156" fill="#95999d" fontFamily="monospace" fontSize="5.2">View only</text>
+      </g>
+      <g stroke="#7b8792" strokeWidth=".8">
+        <path d="M214 184v5m5-7v7m5-5v5m5-8v8m5-4v4m5-7v7m5-5v5m5-9v9m5-4v4m5-7v7m5-5v5m5-9v9" />
+      </g>
+      <path d="M269 181v9" stroke="#3150d2" strokeWidth="1" />
+      <path d="M59 176a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" stroke="#7c8994" strokeWidth=".8" />
+      <path d="M61 176h2m-1-1v2" stroke="#7c8994" strokeWidth=".7" />
+    </svg>
   )
 }
 
@@ -202,33 +216,16 @@ function BrandingSection() {
 // ---------------------------------------------------------------------------
 
 async function apiLogin(email, password) {
-  const res = await fetch('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ email, password }),
-  })
-  const data = await res.json()
-  if (!res.ok) {
-    throw new Error(data.detail || 'Login failed')
-  }
-  return data
+  return apiPost('/api/auth/login', { email, password })
 }
 
 async function apiGetMe() {
-  const res = await fetch('/api/auth/me', {
-    credentials: 'include',
-  })
-  if (!res.ok) return null
-  const data = await res.json()
+  const data = await apiGet('/api/auth/me')
   return data.user
 }
 
 async function apiLogout() {
-  await fetch('/api/auth/logout', {
-    method: 'POST',
-    credentials: 'include',
-  })
+  await apiPost('/api/auth/logout', null)
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +235,7 @@ async function apiLogout() {
 function LoginForm({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
   const [notice, setNotice] = useState('')
@@ -282,38 +280,33 @@ function LoginForm({ onLogin }) {
   }
 
   return (
-    <section className="flex items-center justify-center px-5 py-6 sm:px-8 lg:min-h-screen lg:w-[42%] lg:px-7 lg:py-10">
-      <div className="w-full max-w-[442px] rounded-[18px] border border-white/80 bg-white px-7 py-8 shadow-[0_12px_30px_rgba(29,55,82,0.13)] sm:px-9 sm:py-9">
-        <div className="mb-5 flex justify-center">
-          <BrandName compact />
-        </div>
-        <h1 className="mb-7 text-center text-[23px] font-bold tracking-[-0.45px] text-suredocs-ink sm:text-[25px]">
-          Sign In to Your Account
-        </h1>
-        <form className="space-y-5" noValidate onSubmit={handleSubmit}>
+    <section className="login-form-panel">
+      <p className="login-admin-notice">Access is managed by your organization's administrator.</p>
+      <div className="login-form-content">
+        <h1>Welcome back</h1>
+        <p className="login-form-subtitle">Sign in to your SureDocs workspace.</p>
+        <form noValidate onSubmit={handleSubmit}>
           <LoginField
             error={errors.email}
-            icon={<EmailIcon />}
             id="email"
-            label="Work Email"
+            label="Work email"
             onChange={updateEmail}
-            placeholder="Enter your work email"
+            placeholder="name@company.com"
             type="email"
             value={email}
           />
           <LoginField
             error={errors.password}
-            icon={<LockIcon />}
             id="password"
             label="Password"
             onChange={updatePassword}
-            placeholder="Enter your password"
+            placeholder=""
             type={showPassword ? 'text' : 'password'}
             value={password}
             trailing={
               <button
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
-                className="rounded p-1 text-suredocs-muted transition-colors hover:text-suredocs-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200"
+                className="login-eye-button"
                 onClick={() => setShowPassword((v) => !v)}
                 tabIndex={-1}
                 type="button"
@@ -322,24 +315,50 @@ function LoginForm({ onLogin }) {
               </button>
             }
           />
+          <div className="login-options">
+            <label className="login-remember">
+              <input
+                checked={rememberMe}
+                onChange={(event) => setRememberMe(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Remember me</span>
+            </label>
+            <span aria-disabled="true" className="login-link login-unavailable">
+              Forgot password?
+            </span>
+          </div>
           <button
-            className="flex h-[50px] w-full items-center justify-center rounded-full bg-suredocs-blue px-5 text-base font-semibold text-white shadow-[0_4px_10px_rgba(37,99,235,0.24)] transition-colors hover:bg-suredocs-blue-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
+            className="login-submit"
             disabled={loading}
             type="submit"
           >
-            {loading ? <SpinnerIcon /> : 'Sign In'}
+            {loading ? <SpinnerIcon /> : 'Sign in to SureDocs →'}
           </button>
           <p
             aria-live="polite"
-            className={`min-h-5 text-center text-sm ${
-              notice ? 'text-red-600' : 'text-suredocs-secondary'
-            }`}
+            className={`login-notice${notice ? ' has-notice' : ''}`}
             role="status"
           >
             {notice}
           </p>
         </form>
+        <p className="login-support">
+          Having trouble signing in?{' '}
+          <span aria-disabled="true" className="login-unavailable">
+            Contact support.
+          </span>
+        </p>
       </div>
+      <footer className="login-footer">
+        <span>© 2026 SureDocs</span>
+        <span className="login-encrypted">
+          <svg aria-hidden="true" viewBox="0 0 12 14">
+            <path d="M3 6V4a3 3 0 0 1 6 0v2M2 6h8v7H2z" fill="currentColor" />
+          </svg>
+          ENCRYPTED SESSION
+        </span>
+      </footer>
     </section>
   )
 }
@@ -417,7 +436,7 @@ function App() {
     if (!user) {
       window.history.replaceState(null, '', '/')
       return (
-        <main className="login-backdrop flex min-h-screen flex-col lg:flex-row">
+        <main className="login-page">
           <BrandingSection />
           <LoginForm onLogin={handleLogin} />
         </main>
@@ -425,9 +444,9 @@ function App() {
     }
     if (user.role !== 'ADMIN') {
       window.history.replaceState(null, '', '/employee')
-      return <EmployeeDashboard />
+      return <EmployeeDashboard user={user} />
     }
-    return <AdminDashboard />
+    return <AdminDashboard user={user} />
   }
 
   // Protected employee routes
@@ -435,26 +454,26 @@ function App() {
     if (!user) {
       window.history.replaceState(null, '', '/')
       return (
-        <main className="login-backdrop flex min-h-screen flex-col lg:flex-row">
+        <main className="login-page">
           <BrandingSection />
           <LoginForm onLogin={handleLogin} />
         </main>
       )
     }
-    return <EmployeeDashboard />
+    return <EmployeeDashboard user={user} />
   }
 
   // Root path: if authenticated, redirect to dashboard
   if (user) {
     const target = user.role === 'ADMIN' ? '/admin' : '/employee'
     window.history.replaceState(null, '', target)
-    if (user.role === 'ADMIN') return <AdminDashboard />
-    return <EmployeeDashboard />
+    if (user.role === 'ADMIN') return <AdminDashboard user={user} />
+    return <EmployeeDashboard user={user} />
   }
 
   // Unauthenticated — show login
   return (
-    <main className="login-backdrop flex min-h-screen flex-col lg:flex-row">
+    <main className="login-page">
       <BrandingSection />
       <LoginForm onLogin={handleLogin} />
     </main>
@@ -462,4 +481,3 @@ function App() {
 }
 
 export default App
-

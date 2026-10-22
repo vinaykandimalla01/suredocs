@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react'
+import { apiGet, apiPost } from './api.js'
+import DocumentsWorkspace from './DocumentsWorkspace.jsx'
+import AdminUsersPage from './AdminUsersPage.jsx'
+import UserAvatar from './UserAvatar.jsx'
 
 const navItems = [
   { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
@@ -293,14 +297,23 @@ function Sidebar({ pathname }) {
           )
         })}
       </nav>
-      <div className="mt-auto hidden border-t border-slate-800 px-5 py-4 text-xs text-slate-500 lg:block">
-        Administrator preview · mock data
+      <div className="mt-auto border-t border-slate-800 px-3 py-3">
+        <a
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+          href="/"
+        >
+          <Icon className="h-[17px] w-[17px]" name="security" />
+          Sign out
+        </a>
       </div>
     </aside>
   )
 }
 
-function TopBar() {
+function TopBar({ user }) {
+  const displayName = user?.full_name || 'Administrator'
+  const displayRole = user?.job_title || (user?.role === 'ADMIN' ? 'Administrator' : 'Employee')
+
   return (
     <header className="flex h-[68px] items-center justify-between border-b border-slate-200 bg-white px-5 sm:px-8">
       <div className="relative hidden w-full max-w-[330px] sm:block">
@@ -322,13 +335,23 @@ function TopBar() {
           <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500" />
         </button>
         <div className="flex items-center gap-2.5 border-l border-slate-200 pl-4">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">
-            AD
-          </span>
+          <UserAvatar
+            className="h-9 w-9 bg-slate-900 text-xs font-semibold text-white"
+            email={user?.email}
+            fullName={user?.full_name}
+          />
           <div className="hidden sm:block">
-            <p className="text-xs font-semibold text-slate-800">Administrator</p>
-            <p className="text-[11px] text-slate-500">Admin preview</p>
+            <p className="text-xs font-semibold text-slate-800">{displayName}</p>
+            <p className="text-[11px] text-slate-500">{displayRole}</p>
           </div>
+          <a
+            aria-label="Sign out"
+            className="ml-2 rounded p-1.5 text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            href="/"
+            title="Sign out"
+          >
+            Sign out
+          </a>
         </div>
       </div>
     </header>
@@ -685,12 +708,29 @@ function PlatformHealth() {
 }
 
 function DashboardContent() {
-  const users = loadMockUsers()
-  const activeUsers = users.filter((user) => user.status === 'Active').length
-  const disabledUsers = users.filter((user) => user.status === 'Disabled').length
+  const [summary, setSummary] = useState(null)
+  const [documentSummary, setDocumentSummary] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    Promise.all([
+      apiGet('/api/admin/users/summary', { signal: controller.signal }),
+      apiGet('/api/documents/summary', { signal: controller.signal }),
+    ])
+      .then(([users, documents]) => {
+        setSummary(users)
+        setDocumentSummary(documents)
+      })
+      .catch((requestError) => {
+        if (requestError.name !== 'AbortError') setError(requestError.message)
+      })
+    return () => controller.abort()
+  }, [])
 
   return (
     <>
+      {error && <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert">{error}</p>}
       <div className="grid grid-cols-1 gap-3 min-[440px]:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           detail="Accounts in the platform"
@@ -698,7 +738,7 @@ function DashboardContent() {
           icon="users"
           label="Total registered users"
           tone="bg-blue-50 text-blue-700"
-          value={String(users.length)}
+          value={summary ? String(summary.total_users) : '—'}
         />
         <MetricCard
           detail="Files shared across SureDocs"
@@ -706,15 +746,15 @@ function DashboardContent() {
           icon="documents"
           label="Total documents"
           tone="bg-violet-50 text-violet-700"
-          value="482"
+          value={documentSummary ? String(documentSummary.organization_documents) : '—'}
         />
         <MetricCard
-          detail="Enabled users who have signed in"
+          detail="Accounts currently active"
           href="/admin/users?filter=active"
           icon="check"
           label="Active accounts"
           tone="bg-emerald-50 text-emerald-700"
-          value={String(activeUsers)}
+          value={summary ? String(summary.active_users) : '—'}
         />
         <MetricCard
           detail="Suspended by an administrator"
@@ -722,18 +762,19 @@ function DashboardContent() {
           icon="security"
           label="Disabled accounts"
           tone="bg-rose-50 text-rose-700"
-          value={String(disabledUsers)}
+          value={summary ? String(summary.disabled_users) : '—'}
         />
       </div>
 
       <div className="mt-4 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2.1fr)_minmax(0,5fr)]">
         <div className="grid grid-cols-1 gap-3 min-[440px]:grid-cols-2 xl:grid-cols-1">
           <MetricCard
-            detail="Approximate document storage used"
-            icon="storage"
-            label="Storage used"
+            detail="Currently active document records"
+            href="/admin/documents"
+            icon="documents"
+            label="Active documents"
             tone="bg-sky-50 text-sky-700"
-            value="23 GB"
+            value={documentSummary ? String(documentSummary.active_documents) : '—'}
           />
           <MetricCard
             detail="Unauthorized access attempts denied"
@@ -757,7 +798,7 @@ function DashboardContent() {
 const sectionDetails = {
   '/admin/users': {
     title: 'User management',
-    description: 'Review registered accounts and their access status.',
+    description: 'Review user accounts, roles, profile details, and access status.',
     filters: { all: 'All registered users', active: 'Active accounts', disabled: 'Disabled accounts' },
   },
   '/admin/documents': {
@@ -778,7 +819,7 @@ const sectionDetails = {
   },
 }
 
-function CreateUserModal({ onClose, onCreate, passwords }) {
+export function CreateUserModal({ onClose, onCreate, passwords }) {
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
@@ -4135,7 +4176,7 @@ function SectionPlaceholder({ pathname }) {
   )
 }
 
-export default function AdminDashboard() {
+export default function AdminDashboard({ user }) {
   const pathname = window.location.pathname.replace(/\/$/, '') || '/admin'
   const isDashboard = pathname === '/admin' || pathname === '/admin/index.html'
   const isUserManagement = pathname.startsWith('/admin/users')
@@ -4144,6 +4185,30 @@ export default function AdminDashboard() {
   const isAudit = pathname.startsWith('/admin/audit')
   const isSecurity = pathname.startsWith('/admin/security')
   const [createOpen, setCreateOpen] = useState(false)
+  const [createdNotice, setCreatedNotice] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  async function handleCreateUser(invitation) {
+    try {
+      const payload = {
+        first_name: invitation.firstName,
+        last_name: invitation.lastName,
+        email: invitation.email,
+        role: invitation.role === 'Administrator' ? 'ADMIN' : 'EMPLOYEE',
+        department: invitation.department,
+        username: invitation.username,
+        password: invitation.password,
+        require_password_change: invitation.requirePasswordChange,
+      }
+      await apiPost('/api/admin/users', payload)
+      setCreatedNotice(`Created ${invitation.firstName} ${invitation.lastName} as an invited account.`)
+      setCreateOpen(false)
+      setRefreshKey((k) => k + 1)
+      return ''
+    } catch (requestError) {
+      return requestError.message || 'Failed to create user.'
+    }
+  }
   const [selectedDocumentId, setSelectedDocumentId] = useState(() => {
     const match = window.location.pathname.match(/^\/admin\/documents\/([^/]+)$/)
     return match ? decodeURIComponent(match[1]) : null
@@ -4222,7 +4287,7 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-[#f5f7fb] text-slate-900 lg:pl-[248px]">
       <Sidebar pathname={pathname} />
       <div className="min-h-screen">
-        <TopBar />
+        <TopBar user={user} />
         <main className="mx-auto max-w-[1600px] px-4 pb-8 pt-6 sm:px-6 lg:px-8">
           {!isDocuments && !isPermissions && !isAudit && !isSecurity && <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -4239,7 +4304,7 @@ export default function AdminDashboard() {
                   ? 'Overview of users, documents, permissions, and security activity.'
                   : isUserManagement
                     ? 'Manage user accounts, roles, and account status.'
-                    : 'Administrator workspace · mock preview'}
+                    : 'Administrator workspace'}
               </p>
             </div>
             {isUserManagement && (
@@ -4252,25 +4317,33 @@ export default function AdminDashboard() {
                 Create / Invite User
               </button>
             )}
-            {isDashboard && (
-              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                Mock data · backend not connected
-              </div>
-            )}
           </div>}
+          {createdNotice && (
+            <div className="mb-4 flex items-center justify-between rounded-lg bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800" role="status">
+              <span>{createdNotice}</span>
+              <button
+                aria-label="Dismiss notice"
+                className="font-bold text-emerald-700 hover:text-emerald-900"
+                onClick={() => setCreatedNotice('')}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+          )}
           {isDashboard ? (
             <DashboardContent />
           ) : isUserManagement ? (
-            <UserManagement
-              createOpen={createOpen}
+            <AdminUsersPage
               initialFilter={
                 new URLSearchParams(window.location.search).get('filter') ?? 'all'
               }
-              setCreateOpen={setCreateOpen}
+              refreshKey={refreshKey}
             />
           ) : isDocuments ? (
-            <DocumentRegistry
+            <DocumentsWorkspace
+              mode="registry"
+              user={user}
               initialDocumentId={selectedDocumentId}
               onCloseDocument={closeDocument}
               onOpenDocument={openDocument}
@@ -4291,6 +4364,13 @@ export default function AdminDashboard() {
             <SecurityMonitoring />
           ) : (
             <SectionPlaceholder pathname={pathname} />
+          )}
+          {createOpen && (
+            <CreateUserModal
+              onClose={() => setCreateOpen(false)}
+              onCreate={handleCreateUser}
+              passwords={[]}
+            />
           )}
         </main>
       </div>

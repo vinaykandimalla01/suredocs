@@ -97,6 +97,14 @@ CORS_ORIGINS: list[str] = [
 MAX_FAILED_LOGIN_ATTEMPTS: int = 5
 LOCKOUT_DURATION_SECONDS: int = 15 * 60  # 15 minutes
 
+# Private document object storage settings; AWS credentials use the SDK chain.
+AWS_REGION: str = os.getenv("SUREDOCS_AWS_REGION", "ap-south-1")
+S3_BUCKET: str = os.getenv(
+    "SUREDOCS_S3_BUCKET",
+    "suredocs-private-documents-dev",
+)
+MAX_DOCUMENT_SIZE_BYTES: int = 50 * 1024 * 1024
+
 # ---------------------------------------------------------------------------
 # Password policy
 # ---------------------------------------------------------------------------

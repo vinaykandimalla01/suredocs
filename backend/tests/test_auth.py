@@ -21,6 +21,7 @@ from app.core.config import LOCKOUT_DURATION_SECONDS, MAX_FAILED_LOGIN_ATTEMPTS
 from app.core.security import hash_password, hash_session_token
 from app.models.user import AccountStatus, User, UserRole
 from app.models.user_session import UserSession
+from app.schemas.auth import LoginRequest
 
 
 # =========================================================================
@@ -51,6 +52,14 @@ def logout(client: TestClient) -> dict:
 
 class TestCredentialVerification:
     """Tests 1–9: correct/incorrect credentials, email normalization."""
+
+    def test_login_request_accepts_suredocs_synthetic_email_domain(self):
+        request = LoginRequest(
+            email="synthetic.user@suredocs.test",
+            password="SyntheticPassword1!",
+        )
+
+        assert request.email == "synthetic.user@suredocs.test"
 
     def test_correct_admin_login(self, client, active_admin):
         """Test 2: Correct email and password for an administrator."""

@@ -263,6 +263,9 @@ async def login(
         full_name=user.full_name,
         email=user.email,
         role=user.role.value,
+        department=user.department,
+        job_title=user.job_title,
+        employee_code=user.employee_code,
     )
 
     return LoginResponse(user=user_resp)
@@ -287,6 +290,9 @@ async def get_me(
             full_name=user.full_name,
             email=user.email,
             role=user.role.value,
+            department=user.department,
+            job_title=user.job_title,
+            employee_code=user.employee_code,
         )
     )
 

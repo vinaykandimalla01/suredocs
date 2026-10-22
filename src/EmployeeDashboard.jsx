@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { apiGet } from './api.js'
+import DocumentsWorkspace from './DocumentsWorkspace.jsx'
+import UserAvatar from './UserAvatar.jsx'
 
 const employeeNavigation = [
   { label: 'Dashboard', href: '/employee', icon: 'home' },
@@ -62,9 +65,9 @@ const requestExamples = [
   { id: 'REQ-2025-006', requester: 'Rohit Kulkarni', department: 'Operations', document: 'Budget_Proposal.xlsx', size: '2.1 MB', permission: 'View', reason: 'Please share this document for planning.', requested: '16 May 2025 02:30 PM', status: 'Approved', expires: '—', attachment: '' },
   { id: 'REQ-2025-007', requester: 'Amit Kumar', department: 'Engineering', document: 'Product_Roadmap.pptx', size: '3.5 MB', permission: 'Download', reason: 'Need a copy for the upcoming client meeting.', requested: '14 May 2025 10:16 AM', status: 'Pending', expires: '30 Jun 2025', attachment: '' },
   { id: 'REQ-2025-008', requester: 'Sneha Kapoor', department: 'Design', document: 'Product_Design.png', size: '4.1 MB', permission: 'View', reason: 'Need to review latest design assets.', requested: '12 May 2025 04:10 PM', status: 'Approved', expires: '—', attachment: '' },
-  { id: 'REQ-2025-009', requester: 'You (Vinay Sharma)', department: 'Engineering', document: 'Security_Guidelines.docx', size: '1.2 MB', permission: 'View', reason: 'I need the security guidelines for my current project.', requested: '11 May 2025 09:30 AM', status: 'Pending', expires: '—', attachment: '', isMine: true },
-  { id: 'REQ-2025-010', requester: 'You (Vinay Sharma)', department: 'Engineering', document: 'Team_Guidelines.docx', size: '1.8 MB', permission: 'View', reason: 'I need to review the latest team guidelines.', requested: '09 May 2025 01:45 PM', status: 'Approved', expires: '—', attachment: '', isMine: true },
-  { id: 'REQ-2025-011', requester: 'You (Vinay Sharma)', department: 'Engineering', document: 'Confidential_Draft.pdf', size: '2.8 MB', permission: 'View', reason: 'I need the draft for a project review.', requested: '08 May 2025 11:15 AM', status: 'Rejected', expires: '—', attachment: '', isMine: true },
+  { id: 'REQ-2025-009', requester: 'You', department: 'Engineering', document: 'Security_Guidelines.docx', size: '1.2 MB', permission: 'View', reason: 'I need the security guidelines for my current project.', requested: '11 May 2025 09:30 AM', status: 'Pending', expires: '—', attachment: '', isMine: true },
+  { id: 'REQ-2025-010', requester: 'You', department: 'Engineering', document: 'Team_Guidelines.docx', size: '1.8 MB', permission: 'View', reason: 'I need to review the latest team guidelines.', requested: '09 May 2025 01:45 PM', status: 'Approved', expires: '—', attachment: '', isMine: true },
+  { id: 'REQ-2025-011', requester: 'You', department: 'Engineering', document: 'Confidential_Draft.pdf', size: '2.8 MB', permission: 'View', reason: 'I need the draft for a project review.', requested: '08 May 2025 11:15 AM', status: 'Rejected', expires: '—', attachment: '', isMine: true },
 ]
 
 const additionalOwnedDocuments = [
@@ -214,8 +217,11 @@ function EmployeeSidebar({ pathname }) {
   )
 }
 
-function EmployeeTopBar({ notificationsOpen, setNotificationsOpen, unreadCount, search, onSearchChange }) {
+function EmployeeTopBar({ user, notificationsOpen, setNotificationsOpen, unreadCount, search, onSearchChange }) {
   const searchProps = search === undefined ? {} : { onChange: onSearchChange, value: search }
+  const initial = user?.full_name?.trim().charAt(0) || user?.email?.trim().charAt(0) || 'U'
+  const displayName = user?.full_name || 'Employee'
+  const displayRole = user?.job_title || user?.role || 'Employee'
 
   return (
     <header className="flex min-h-[48px] items-center gap-4 border-b border-slate-200 bg-white px-4 sm:px-5">
@@ -248,10 +254,14 @@ function EmployeeTopBar({ notificationsOpen, setNotificationsOpen, unreadCount, 
           )}
         </div>
         <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0e8290] text-[9px] font-semibold text-white">VS</span>
+          <UserAvatar
+            className="h-7 w-7 bg-[#0e8290] text-[9px] text-white"
+            email={user?.email}
+            fullName={user?.full_name}
+          />
           <span className="hidden sm:block">
-            <span className="block text-[9px] font-semibold text-slate-800">Vinay Sharma</span>
-            <span className="block text-[8px] text-slate-500">Employee</span>
+            <span className="block text-[9px] font-semibold text-slate-800">{displayName}</span>
+            <span className="block text-[8px] text-slate-500">{displayRole}</span>
           </span>
           <span aria-hidden="true" className="hidden text-slate-500 sm:block">⌄</span>
         </div>
@@ -289,14 +299,40 @@ function PanelHeading({ title, href, linkText = 'View All' }) {
   )
 }
 
-function EmployeeDashboardContent() {
+function EmployeeDashboardContent({ user }) {
   const [search, setSearch] = useState('')
+  const [myDocuments, setMyDocuments] = useState([])
+  const [documentSummary, setDocumentSummary] = useState(null)
+  const [documentError, setDocumentError] = useState('')
   const [notifications, setNotifications] = useState(employeeNotifications)
   const [unreadCount, setUnreadCount] = useState(5)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const filteredDocuments = useMemo(() => employeeDocuments.filter((document) =>
-    `${document.name} ${document.owner} ${document.access}`.toLowerCase().includes(search.toLowerCase()),
-  ), [search])
+  const filteredDocuments = useMemo(() => myDocuments.filter((document) =>
+    `${document.title} ${document.original_filename ?? ''} ${document.owner_name}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  ), [myDocuments, search])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    Promise.all([
+      apiGet('/api/documents/my', { signal: controller.signal }),
+      apiGet('/api/documents/summary', { signal: controller.signal }),
+    ])
+      .then(([owned, summary]) => {
+        setMyDocuments(owned.items)
+        setDocumentSummary(summary)
+      })
+      .catch((requestError) => {
+        if (requestError.name !== 'AbortError') setDocumentError(requestError.message)
+      })
+    return () => controller.abort()
+  }, [])
+
+  const firstName = user?.full_name?.trim().split(/\s+/)[0] || 'there'
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const todayLabel = new Date().toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
   const quickLinks = [
     { href: '/employee/upload', icon: 'upload', title: 'Upload Document', detail: 'Add a new document', primary: true },
@@ -305,9 +341,9 @@ function EmployeeDashboardContent() {
     { href: '/employee/permissions', icon: 'share', title: 'Sharing & Permissions', detail: 'Manage access to your documents' },
   ]
   const metricCards = [
-    { icon: 'file', value: '24', label: 'My Documents', detail: 'Owned by you', tone: 'bg-teal-50 text-emerald-700', badge: 'bg-emerald-100' },
-    { icon: 'folder', value: '12', label: 'Shared with Me', detail: 'Available to access', tone: 'bg-blue-50 text-blue-700', badge: 'bg-blue-100' },
-    { icon: 'users', value: '8', label: 'Documents I Share', detail: 'Owned and shared by you', tone: 'bg-violet-50 text-violet-700', badge: 'bg-violet-100' },
+    { icon: 'file', value: documentSummary ? String(documentSummary.owned_documents) : '—', label: 'My Documents', detail: 'Owned by you', tone: 'bg-teal-50 text-emerald-700', badge: 'bg-emerald-100' },
+    { icon: 'folder', value: documentSummary ? String(documentSummary.shared_with_me) : '—', label: 'Shared with Me', detail: 'Available to access', tone: 'bg-blue-50 text-blue-700', badge: 'bg-blue-100' },
+    { icon: 'users', value: documentSummary ? String(documentSummary.shared_by_me) : '—', label: 'Documents I Share', detail: 'Owned and shared by you', tone: 'bg-violet-50 text-violet-700', badge: 'bg-violet-100' },
     { icon: 'clock', value: '3', label: 'Pending Requests', detail: 'Requiring your attention', tone: 'bg-amber-50 text-amber-700', badge: 'bg-amber-100' },
   ]
 
@@ -320,6 +356,7 @@ function EmployeeDashboardContent() {
   return (
     <>
       <EmployeeTopBar
+        user={user}
         notificationsOpen={notificationsOpen}
         onSearchChange={(event) => setSearch(event.target.value)}
         search={search}
@@ -329,11 +366,11 @@ function EmployeeDashboardContent() {
       <main className="mx-auto max-w-[1600px] space-y-3 px-4 pb-5 pt-4 sm:px-5 lg:px-5">
         <section className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h1 className="text-[20px] font-bold tracking-tight text-slate-900">Good morning, Vinay!</h1>
+            <h1 className="text-[20px] font-bold tracking-tight text-slate-900">{greeting}, {firstName}!</h1>
             <p className="mt-0.5 text-[10px] text-slate-600">Your secure workspace for documents, sharing and access activity.</p>
           </div>
           <div className="text-left text-[8px] text-slate-500 sm:text-right">
-            <p className="font-semibold text-slate-600">Tuesday, 27 May 2025</p>
+            <p className="font-semibold text-slate-600">{todayLabel}</p>
             <p className="mt-0.5">Stay productive and secure with SureDocs.</p>
           </div>
         </section>
@@ -356,6 +393,7 @@ function EmployeeDashboardContent() {
             </a>
           ))}
         </section>
+        {documentError && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{documentError}</p>}
 
         <div className="grid grid-cols-1 items-start gap-2 lg:grid-cols-[1.05fr_0.9fr]">
           <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
@@ -373,17 +411,17 @@ function EmployeeDashboardContent() {
                 </thead>
                 <tbody>
                   {filteredDocuments.map((document) => (
-                    <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60" key={document.name}>
+                    <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60" key={document.id}>
                       <td className="px-2 py-2">
                         <span className="flex items-center gap-2">
-                          <EmployeeDocumentIcon document={document} />
-                          <span className="whitespace-nowrap text-[8px] font-medium text-slate-700">{document.name}</span>
+                          <EmployeeDocumentIcon document={{ type: document.original_filename?.split('.').pop()?.toUpperCase() ?? 'FILE', tone: 'bg-blue-600' }} />
+                          <span className="whitespace-nowrap text-[8px] font-medium text-slate-700">{document.title}</span>
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-2 py-2 text-[8px] text-slate-500">{document.owner}</td>
-                      <td className="whitespace-nowrap px-2 py-2 text-[8px] text-slate-500">{document.modified}</td>
-                      <td className="px-2 py-2"><span className={`rounded-full px-2 py-1 text-[7px] font-semibold ${document.access === 'Owner' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-700'}`}>{document.access}</span></td>
-                      <td className="px-2 py-2 text-center"><button aria-label={`More actions for ${document.name}`} className="rounded p-1 text-slate-500 hover:bg-slate-100" type="button"><EmployeeIcon className="h-3.5 w-3.5" name="more" /></button></td>
+                      <td className="whitespace-nowrap px-2 py-2 text-[8px] text-slate-500">{document.owner_name}</td>
+                      <td className="whitespace-nowrap px-2 py-2 text-[8px] text-slate-500">{new Date(document.updated_at).toLocaleDateString()}</td>
+                      <td className="px-2 py-2"><span className="rounded-full bg-emerald-100 px-2 py-1 text-[7px] font-semibold text-emerald-800">Owner</span></td>
+                      <td className="px-2 py-2 text-center"><a aria-label={`Open ${document.title}`} className="rounded p-1 text-blue-700 hover:bg-blue-50" href="/employee/documents"><EmployeeIcon className="h-3.5 w-3.5" name="arrow" /></a></td>
                     </tr>
                   ))}
                   {filteredDocuments.length === 0 && <tr><td className="px-2 py-6 text-center text-[9px] text-slate-500" colSpan={5}>No documents match your search.</td></tr>}
@@ -568,7 +606,7 @@ function EmployeePagination({ count, page, pageSize, onPageChange, label = 'docu
   )
 }
 
-function EmployeeDocumentsPage({ shared = false }) {
+function EmployeeDocumentsPage({ shared = false, user }) {
   const docs = shared ? sharedDocumentRecords : ownedDocumentRecords
   const [search, setSearch] = useState('')
   const [type, setType] = useState('all')
@@ -735,7 +773,7 @@ function EmployeeDocumentsPage({ shared = false }) {
                   <h3 className="mb-2 text-[9px] font-semibold text-slate-800">Document Information</h3>
                   <dl className="space-y-1.5 text-[7px]">
                     {[
-                      ['Owner', shared ? `${selected.owner} (${selected.department})` : 'You (Vinay Sharma)'],
+                      ['Owner', shared ? `${selected.owner} (${selected.department})` : (user?.full_name ? `You (${user.full_name})` : 'You')],
                       ['Classification', selected.classification],
                       ['File Type', `${selected.type} (${selected.size})`],
                       [shared ? 'Shared On' : 'Created', `${selected.modified}, 10:24 AM`],
@@ -785,7 +823,7 @@ function EmployeeDocumentsPage({ shared = false }) {
   )
 }
 
-function UploadDocumentPage() {
+function UploadDocumentPage({ user }) {
   const [file, setFile] = useState(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -942,7 +980,7 @@ function UploadDocumentPage() {
             ) : <p className="mt-3 text-[8px] text-slate-500">Select a file to preview its details.</p>}
             <div className="mt-3 border-t border-slate-100 pt-2">
               <h3 className="text-[9px] font-semibold text-slate-800">Document Information</h3>
-              <dl className="mt-2 space-y-1 text-[7px]">{[['Name', name || '—'], ['Description', description || '—'], ['Classification', classification], ['File Type', file?.name.split('.').pop()?.toUpperCase() ?? '—'], ['File Size', file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : '—'], ['Created By', 'You (Vinay Sharma)'], ['Created On', '27 May 2025, 10:24 AM']].map(([label, value]) => <div className="grid grid-cols-[64px_1fr] gap-1" key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words text-slate-700">{value}</dd></div>)}</dl>
+              <dl className="mt-2 space-y-1 text-[7px]">{[['Name', name || '—'], ['Description', description || '—'], ['Classification', classification], ['File Type', file?.name.split('.').pop()?.toUpperCase() ?? '—'], ['File Size', file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : '—'], ['Created By', user?.full_name ? `You (${user.full_name})` : 'You'], ['Created On', '27 May 2025, 10:24 AM']].map(([label, value]) => <div className="grid grid-cols-[64px_1fr] gap-1" key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words text-slate-700">{value}</dd></div>)}</dl>
             </div>
           </section>
           <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
@@ -964,7 +1002,7 @@ function UploadDocumentPage() {
   )
 }
 
-function EmployeeActivityPage() {
+function EmployeeActivityPage({ user }) {
   const [search, setSearch] = useState('')
   const [documentFilter, setDocumentFilter] = useState('all')
   const [actionFilter, setActionFilter] = useState('all')
@@ -1050,7 +1088,7 @@ function EmployeeActivityPage() {
                 : tab === 'User Info'
                   ? [['Name', selected.actor], ['Department', selected.department], ['Role', 'Employee'], ['IP Address', selected.ip], ['Location', 'Hyderabad, India']]
                   : tab === 'Document Info'
-                    ? [['Document', selected.document], ['File Type', selected.type], ['Owner', selected.actor === 'You' ? 'You (Vinay Sharma)' : 'Document owner'], ['Access', 'Authorized']]
+                    ? [['Document', selected.document], ['File Type', selected.type], ['Owner', selected.actor === 'You' ? (user?.full_name ? `You (${user.full_name})` : 'You') : 'Document owner'], ['Access', 'Authorized']]
                     : [['Security Status', selected.outcome], ['Device', 'Windows Chrome'], ['IP Address', selected.ip], ['Request ID', 'req_01HZY8K3D7F9A2']]
               ).map(([label, value]) => <div className="grid grid-cols-[65px_1fr] gap-1" key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words text-slate-700">{value}</dd></div>)}
             </dl>
@@ -1062,7 +1100,7 @@ function EmployeeActivityPage() {
   )
 }
 
-function EmployeeRequestsPage() {
+function EmployeeRequestsPage({ user }) {
   const [requests, setRequests] = useState(requestExamples)
   const [tab, setTab] = useState('approve')
   const [selectedId, setSelectedId] = useState(requestExamples[0].id)
@@ -1199,14 +1237,14 @@ function RequestTable({ title, requests, selectedId, onSelect, onUpdate, empty }
   )
 }
 
-function EmployeeSectionPlaceholder({ pathname }) {
+function EmployeeSectionPlaceholder({ user, pathname }) {
   const section = [...employeeNavigation, ...employeeBottomNavigation]
     .find((item) => item.href === pathname)
   const title = section?.label ?? 'Employee workspace'
 
   return (
     <>
-      <EmployeeTopBar notificationsOpen={false} onSearchChange={() => {}} search="" setNotificationsOpen={() => {}} unreadCount={5} />
+      <EmployeeTopBar user={user} notificationsOpen={false} onSearchChange={() => {}} search="" setNotificationsOpen={() => {}} unreadCount={5} />
       <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6">
         <h1 className="text-xl font-semibold text-slate-900">{title}</h1>
         <p className="mt-1 text-xs text-slate-500">Your secure SureDocs employee workspace.</p>
@@ -1220,15 +1258,83 @@ function EmployeeSectionPlaceholder({ pathname }) {
   )
 }
 
-export default function EmployeeDashboard() {
+function EmployeeProfilePage({ user }) {
+  const [profile, setProfile] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    apiGet('/api/users/me/profile', { signal: controller.signal })
+      .then(setProfile)
+      .catch((requestError) => {
+        if (requestError.name !== 'AbortError') setError(requestError.message)
+      })
+    return () => controller.abort()
+  }, [])
+
+  return (
+    <>
+      <EmployeeTopBar
+        user={user}
+        notificationsOpen={false}
+        onSearchChange={() => {}}
+        search=""
+        setNotificationsOpen={() => {}}
+        unreadCount={0}
+      />
+      <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6">
+        <h1 className="text-xl font-semibold text-slate-900">Profile &amp; Settings</h1>
+        <p className="mt-1 text-xs text-slate-500">Your account details from SureDocs.</p>
+        {error && <p className="mt-5 rounded-lg bg-rose-50 p-3 text-sm text-rose-800" role="alert">{error}</p>}
+        {!profile && !error && <p className="mt-5 text-sm text-slate-500" role="status">Loading your profile…</p>}
+        {profile && (
+          <section className="mt-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
+            <div className="flex items-center gap-4 border-b border-slate-100 pb-5">
+              <UserAvatar className="h-14 w-14 text-lg" email={profile.email} fullName={profile.full_name} />
+              <div>
+                <h2 className="font-semibold text-slate-900">{profile.full_name}</h2>
+                <p className="text-sm text-slate-500">{profile.email}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {profile.role} · {profile.account_status}
+                </p>
+              </div>
+            </div>
+            <dl className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
+              {[
+                ['Employee code', profile.employee_code],
+                ['Department', profile.department],
+                ['Job title', profile.job_title],
+                ['Email verified', profile.email_verified_at],
+                ['Account created', profile.created_at],
+                ['Last login', profile.last_login_at],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-xs text-slate-500">{label}</dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-800">
+                    {value ? (label.includes('verified') || label.includes('created') || label.includes('login')
+                      ? new Date(value).toLocaleString()
+                      : value) : '—'}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        )}
+      </main>
+    </>
+  )
+}
+
+export default function EmployeeDashboard({ user }) {
   const pathname = window.location.pathname.replace(/\/$/, '') || '/employee'
   const isDashboard = pathname === '/employee' || pathname === '/employee/dashboard'
   const workspace = {
-    '/employee/documents': <EmployeeDocumentsPage />,
-    '/employee/shared': <EmployeeDocumentsPage shared />,
-    '/employee/upload': <UploadDocumentPage />,
-    '/employee/activity': <EmployeeActivityPage />,
-    '/employee/requests': <EmployeeRequestsPage />,
+    '/employee/documents': <DocumentsWorkspace mode="owned" user={user} />,
+    '/employee/shared': <DocumentsWorkspace mode="shared" user={user} />,
+    '/employee/upload': <DocumentsWorkspace mode="owned" startInUpload user={user} />,
+    '/employee/activity': <EmployeeActivityPage user={user} />,
+    '/employee/requests': <EmployeeRequestsPage user={user} />,
+    '/employee/profile': <EmployeeProfilePage user={user} />,
   }[pathname]
 
   useEffect(() => {
@@ -1240,8 +1346,8 @@ export default function EmployeeDashboard() {
       <EmployeeSidebar pathname={pathname} />
       <div className="min-h-screen">
         {isDashboard
-          ? <EmployeeDashboardContent />
-          : workspace ?? <EmployeeSectionPlaceholder pathname={pathname} />}
+          ? <EmployeeDashboardContent user={user} />
+          : workspace ?? <EmployeeSectionPlaceholder user={user} pathname={pathname} />}
       </div>
     </div>
   )

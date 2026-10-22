@@ -7,6 +7,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -24,6 +25,14 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+
+if TYPE_CHECKING:
+    from app.models.documents import (
+        Document,
+        DocumentAuditLog,
+        DocumentPermission,
+        DocumentVersion,
+    )
 
 
 class UserRole(str, enum.Enum):
@@ -98,6 +107,12 @@ class User(Base):
         nullable=True,
     )
 
+    employee_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    job_title: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     failed_login_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0",
     )
@@ -117,10 +132,47 @@ class User(Base):
     creator: Mapped[User | None] = relationship(
         "User", remote_side="User.id", foreign_keys=[created_by],
     )
+    owned_documents: Mapped[list["Document"]] = relationship(
+        "Document", back_populates="owner", foreign_keys="Document.owner_user_id",
+    )
+    created_documents: Mapped[list["Document"]] = relationship(
+        "Document", back_populates="creator", foreign_keys="Document.created_by_user_id",
+    )
+    uploaded_document_versions: Mapped[list["DocumentVersion"]] = relationship(
+        "DocumentVersion",
+        back_populates="uploaded_by",
+        foreign_keys="DocumentVersion.uploaded_by_user_id",
+    )
+    document_permissions: Mapped[list["DocumentPermission"]] = relationship(
+        "DocumentPermission",
+        back_populates="user",
+        foreign_keys="DocumentPermission.user_id",
+    )
+    granted_document_permissions: Mapped[list["DocumentPermission"]] = relationship(
+        "DocumentPermission",
+        back_populates="granted_by",
+        foreign_keys="DocumentPermission.granted_by_user_id",
+    )
+    revoked_document_permissions: Mapped[list["DocumentPermission"]] = relationship(
+        "DocumentPermission",
+        back_populates="revoked_by",
+        foreign_keys="DocumentPermission.revoked_by_user_id",
+    )
+    document_audit_logs_as_actor: Mapped[list["DocumentAuditLog"]] = relationship(
+        "DocumentAuditLog",
+        back_populates="actor",
+        foreign_keys="DocumentAuditLog.actor_user_id",
+    )
+    document_audit_logs_as_target: Mapped[list["DocumentAuditLog"]] = relationship(
+        "DocumentAuditLog",
+        back_populates="target_user",
+        foreign_keys="DocumentAuditLog.target_user_id",
+    )
 
     __table_args__ = (
         # Case-insensitive unique email index
         Index("ix_users_email_lower", func.lower(email), unique=True),
+        Index("ix_users_employee_code", "employee_code", unique=True),
         # Prevent ACTIVE status when password_hash is null
         CheckConstraint(
             "account_status != 'ACTIVE' OR password_hash IS NOT NULL",

@@ -11,7 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
-
+documents
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -32,6 +32,10 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Local synthetic account credentials — contains plaintext test passwords
+credentials.csv
+.credentials-*.tmp
 
 # Environment files
 .env

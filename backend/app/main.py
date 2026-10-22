@@ -11,6 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import CORS_ORIGINS
 from app.routers.auth import router as auth_router
+from app.routers.documents import router as documents_router
+from app.routers.users import admin_router as admin_users_router
+from app.routers.users import employee_router as user_profile_router
 
 # Configure logging
 logging.basicConfig(
@@ -42,3 +45,6 @@ app.add_middleware(
 # Register routers
 # ---------------------------------------------------------------------------
 app.include_router(auth_router)
+app.include_router(admin_users_router)
+app.include_router(user_profile_router)
+app.include_router(documents_router)

@@ -10,7 +10,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from email_validator import EmailNotValidError, validate_email
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
 
@@ -20,13 +21,27 @@ from app.core.config import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
 # ---------------------------------------------------------------------------
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(..., max_length=320, description="Work email address")
+    email: str = Field(..., max_length=320, description="Work email address")
     password: str = Field(
         ...,
         min_length=1,
         max_length=PASSWORD_MAX_LENGTH,
         description="Account password",
     )
+
+    @field_validator("email")
+    @classmethod
+    def validate_work_email(cls, value: str) -> str:
+        normalized = value.strip()
+        is_suredocs_test_email = normalized.lower().endswith("@suredocs.test")
+        try:
+            return validate_email(
+                normalized,
+                check_deliverability=False,
+                test_environment=is_suredocs_test_email,
+            ).normalized
+        except EmailNotValidError as exc:
+            raise ValueError("Enter a valid email address.") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +54,9 @@ class UserResponse(BaseModel):
     full_name: str
     email: str
     role: str
+    department: str | None = None
+    job_title: str | None = None
+    employee_code: str | None = None
 
     model_config = {"from_attributes": True}
 
