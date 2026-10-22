@@ -49,3 +49,51 @@ I prioritized making the authentication backend functional and testing its secur
 ### Fix Commit
 
 Fix commit id : d3ca681225ea53e046beb68b9b8c3b7edd1ecf8b
+
+
+
+# Entry 3 — Integrating Amazon S3 and Implementing Document Authorization
+
+**Date:** 2026-10-22
+
+### 1. Prompt and Summary
+
+**Summary:** The AI was asked to integrate Amazon S3 into the existing SureDocs application to store actual document files and connect the storage functionality with the existing backend and PostgreSQL database. The implementation requirements included uploading and retrieving real documents from S3, storing document metadata in the database, and enforcing document-level authorization before allowing users to access protected files. The backend was required to verify the authenticated user's permissions before retrieving a document from S3, preventing unauthorized users from accessing confidential document contents.
+
+**Full Prompt:** [Read the complete S3 integration and document authorization prompt](prompts/s3_backend_integration.md)
+
+### 2. What the AI Produced
+
+The AI integrated Amazon S3 as the document storage layer and implemented backend authorization checks for document access. The system uses S3 to store actual document files while maintaining the associated document metadata in PostgreSQL. Before allowing a user to access a document, the backend checks the user's identity and applicable document-level permissions. Only authorized requests should proceed to retrieve the corresponding file from S3.
+
+This implementation establishes the foundation for secure document retrieval and access control in SureDocs. It separates file storage from application metadata and ensures that document access decisions are enforced by the backend rather than relying solely on frontend controls.
+
+### 3. What Was Wrong With It
+
+During S3 integration, a common implementation risk is an incorrect mapping between the document metadata stored in PostgreSQL and the corresponding S3 object key. If the application stores an incorrect object key, constructs the storage path incorrectly, or retrieves a file using an inconsistent identifier, document retrieval can fail even when the file exists in the bucket.
+
+Another critical risk is retrieving an S3 object before completing the document-level authorization check. This could expose confidential document contents to users who do not have permission to access them.
+
+The implementation therefore needs to ensure that the backend uses the trusted storage reference associated with the selected document, verifies authorization before retrieving the object, and handles missing objects and S3 access failures without exposing internal storage details.
+
+### 4. What I Did Instead
+
+I focused on integrating actual S3 document storage with the existing database and ensuring that document access was controlled by the backend. The intended workflow verifies the authenticated user's permission for the selected document before retrieving its contents from S3. This keeps the storage layer separate from the application's authorization logic and prevents frontend-only permission checks from becoming the security boundary.
+
+I also identified the need to handle common S3 retrieval failures, maintain consistent document metadata, and record successful and denied access attempts through the audit-logging system. These safeguards are necessary to make document retrieval reliable, secure, and auditable.
+
+### Implementation Verification
+
+The following items should be verified against the actual codebase before marking this entry as complete:
+
+- Actual document files are uploaded to the intended S3 bucket.
+- PostgreSQL metadata correctly references the corresponding S3 objects.
+- The backend checks document-level permissions before retrieving file contents.
+- Unauthorized requests are denied without exposing document data.
+- Missing S3 objects and storage errors are handled safely.
+- Successful and denied access attempts are recorded in the audit logs.
+- Automated tests cover authorized access, unauthorized access, and S3 retrieval failures.
+
+### Fix Commit
+
+**Fix commit ID:** 2d6d71ed719b6dd7ed405bfe293c3764fc428973
