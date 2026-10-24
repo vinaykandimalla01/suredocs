@@ -97,3 +97,68 @@ The following items should be verified against the actual codebase before markin
 ### Fix Commit
 
 **Fix commit ID:** 2d6d71ed719b6dd7ed405bfe293c3764fc428973
+
+
+# Entry 4 — Diagnosing PostgreSQL Transaction Locks and Protecting Data Integrity During Reconciliation
+
+**Date:** 2026-10-24
+
+### 1. Prompt and Summary
+
+**Summary:** The AI was asked to investigate a failed SureDocs reconciliation operation in PostgreSQL. Although the reconciliation dry run passed, the actual transaction could not commit because another PostgreSQL transaction had remained idle in a transaction for more than six minutes while holding a lock on a user row required by a document ownership foreign-key constraint.
+
+The primary objective was to identify the blocking database session, safely release the lock if it belonged to an abandoned SureDocs operation, and retry the reconciliation without compromising document ownership, permission records, or database consistency.
+
+
+**Full Prompt:** [Read the complete prompt](prompts/Data_Integrity_During_Reconciliation.md)
+### 2. What the AI Produced
+
+The AI established a diagnostic workflow for inspecting PostgreSQL activity and identifying blocking transactions.
+
+The investigation involved:
+
+- Inspecting active PostgreSQL sessions through `pg_stat_activity`.
+- Identifying blocking relationships using `pg_blocking_pids()`.
+- Examining transaction age, session state, application name, and the last executed query.
+- Connecting to the correct PostgreSQL container using Docker Compose and the existing `suredocs` database credentials.
+- Defining safe recovery procedures that distinguish abandoned SureDocs transactions from unrelated active database sessions.
+
+The workflow also emphasized that a failed reconciliation must not be treated as successful merely because its dry run passed.
+
+### 3. What Was Wrong With It
+
+The reconciliation was unable to commit because a conflicting transaction held a lock on a user row required by the document ownership foreign-key relationship.
+
+This created a database concurrency problem: the reconciliation could calculate the intended changes successfully during its dry run, yet the actual transaction could not complete while the conflicting lock remained in place.
+
+Terminating an unidentified PostgreSQL process or restarting the database without investigation could interrupt unrelated operations and cause unnecessary disruption.
+
+The underlying issue therefore required transaction-level diagnosis rather than changes to the frontend or document-sharing logic.
+
+### 4. What I Did Instead
+
+I established a controlled recovery approach that prioritizes data integrity and avoids bypassing PostgreSQL's locking mechanisms.
+
+The approach identifies the blocking process before taking action, verifies whether it belongs to an abandoned SureDocs operation, and releases the lock only through an appropriate transaction rollback or controlled session termination.
+
+After the lock is released, the reconciliation must be retried and its results verified against the actual database.
+
+The validation process must confirm that document ownership relationships and permission counts remain consistent and that no partial or duplicate changes were introduced.
+
+### Implementation Verification
+
+The following items must be verified before marking the issue as resolved:
+
+- The exact PostgreSQL blocking session has been identified.
+- The blocking transaction has been safely completed or rolled back.
+- No unrelated database session has been terminated.
+- The reconciliation transaction has successfully committed.
+- Document ownership foreign-key relationships remain valid.
+- Permission grants and sharing counts remain consistent.
+- No duplicate or partially applied reconciliation records exist.
+- Relevant application logs confirm successful completion.
+
+### Fix Commit
+
+**Fix commit ID:** 0c4cd1352008f05146cd2e60d73f78be725ff486
+
