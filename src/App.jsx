@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost } from './api.js'
-import AdminDashboard from './AdminDashboard.jsx'
-import EmployeeDashboard from './EmployeeDashboard.jsx'
+
+const AdminDashboard = lazy(() => import('./AdminDashboard.jsx'))
+const EmployeeDashboard = lazy(() => import('./EmployeeDashboard.jsx'))
 
 function BrandMark() {
   return (
@@ -73,6 +74,14 @@ function SpinnerIcon() {
         fill="currentColor"
       />
     </svg>
+  )
+}
+
+function DashboardLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <SpinnerIcon />
+    </div>
   )
 }
 
@@ -215,12 +224,16 @@ function AccessIllustration() {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function apiLogin(email, password) {
-  return apiPost('/api/auth/login', { email, password })
+async function apiLogin(email, password, totpCode) {
+  return apiPost('/api/auth/login', {
+    email,
+    password,
+    ...(totpCode ? { totp_code: totpCode } : {}),
+  })
 }
 
-async function apiGetMe() {
-  const data = await apiGet('/api/auth/me')
+async function apiGetMe({ signal } = {}) {
+  const data = await apiGet('/api/auth/me', { signal })
   return data.user
 }
 
@@ -235,6 +248,8 @@ async function apiLogout() {
 function LoginForm({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [totpCode, setTotpCode] = useState('')
+  const [needsTotp, setNeedsTotp] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
@@ -258,10 +273,15 @@ function LoginForm({ onLogin }) {
 
     setLoading(true)
     try {
-      const data = await apiLogin(trimmedEmail, password)
+      const data = await apiLogin(trimmedEmail, password, totpCode)
       onLogin(data.user)
     } catch (err) {
-      setNotice(err.message || 'Authentication failed. Please try again.')
+      if (err.message?.includes('Authenticator code required')) {
+        setNeedsTotp(true)
+        setNotice('Enter the current code from your authenticator app, then sign in again.')
+      } else {
+        setNotice(err.message || 'Authentication failed. Please try again.')
+      }
     } finally {
       setLoading(false)
     }
@@ -269,12 +289,16 @@ function LoginForm({ onLogin }) {
 
   function updateEmail(event) {
     setEmail(event.target.value)
+    setNeedsTotp(false)
+    setTotpCode('')
     if (errors.email) setErrors((current) => ({ ...current, email: '' }))
     setNotice('')
   }
 
   function updatePassword(event) {
     setPassword(event.target.value)
+    setNeedsTotp(false)
+    setTotpCode('')
     if (errors.password) setErrors((current) => ({ ...current, password: '' }))
     setNotice('')
   }
@@ -315,6 +339,17 @@ function LoginForm({ onLogin }) {
               </button>
             }
           />
+          {needsTotp && (
+            <LoginField
+              error={errors.totpCode}
+              id="totpCode"
+              label="Authenticator code"
+              onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="6-digit code"
+              type="text"
+              value={totpCode}
+            />
+          )}
           <div className="login-options">
             <label className="login-remember">
               <input
@@ -371,11 +406,19 @@ function App() {
   const [user, setUser] = useState(null)       // authenticated user from /api/auth/me
   const [checking, setChecking] = useState(true) // initial session check in progress
   const [path, setPath] = useState(window.location.pathname)
+  const sessionCheckRef = useRef(null)
 
   // On mount, validate the existing session cookie
   useEffect(() => {
     let cancelled = false
-    apiGetMe()
+    const controller = new AbortController()
+    const cancelSessionCheck = () => {
+      cancelled = true
+      controller.abort()
+    }
+    sessionCheckRef.current = cancelSessionCheck
+
+    apiGetMe({ signal: controller.signal })
       .then((u) => {
         if (!cancelled) setUser(u)
       })
@@ -385,7 +428,12 @@ function App() {
       .finally(() => {
         if (!cancelled) setChecking(false)
       })
-    return () => { cancelled = true }
+    return () => {
+      cancelSessionCheck()
+      if (sessionCheckRef.current === cancelSessionCheck) {
+        sessionCheckRef.current = null
+      }
+    }
   }, [])
 
   // Listen for popstate (browser back/forward) to re-render
@@ -416,19 +464,19 @@ function App() {
 
   // Handle successful login
   function handleLogin(authenticatedUser) {
+    sessionCheckRef.current?.()
+    sessionCheckRef.current = null
+    setChecking(false)
     setUser(authenticatedUser)
-    const target = authenticatedUser.role === 'ADMIN' ? '/admin' : '/employee'
+    const target = authenticatedUser.role === 'ADMIN' ? '/admin/security' : '/employee'
     window.history.pushState(null, '', target)
     setPath(target)
   }
 
-  // While checking the session, show a brief loading indicator
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <SpinnerIcon />
-      </div>
-    )
+  // Keep protected routes gated until the existing session cookie is checked.
+  // The public sign-in screen can render while this request runs in the background.
+  if (checking && (path.startsWith('/admin') || path.startsWith('/employee'))) {
+    return <DashboardLoading />
   }
 
   // Protected admin routes
@@ -444,9 +492,17 @@ function App() {
     }
     if (user.role !== 'ADMIN') {
       window.history.replaceState(null, '', '/employee')
-      return <EmployeeDashboard user={user} />
+      return (
+        <Suspense fallback={<DashboardLoading />}>
+          <EmployeeDashboard user={user} />
+        </Suspense>
+      )
     }
-    return <AdminDashboard user={user} />
+    return (
+      <Suspense fallback={<DashboardLoading />}>
+        <AdminDashboard user={user} />
+      </Suspense>
+    )
   }
 
   // Protected employee routes
@@ -460,15 +516,29 @@ function App() {
         </main>
       )
     }
-    return <EmployeeDashboard user={user} />
+    return (
+      <Suspense fallback={<DashboardLoading />}>
+        <EmployeeDashboard user={user} />
+      </Suspense>
+    )
   }
 
   // Root path: if authenticated, redirect to dashboard
   if (user) {
-    const target = user.role === 'ADMIN' ? '/admin' : '/employee'
+    const target = user.role === 'ADMIN' ? '/admin/security' : '/employee'
     window.history.replaceState(null, '', target)
-    if (user.role === 'ADMIN') return <AdminDashboard user={user} />
-    return <EmployeeDashboard user={user} />
+    if (user.role === 'ADMIN') {
+      return (
+        <Suspense fallback={<DashboardLoading />}>
+          <AdminDashboard user={user} />
+        </Suspense>
+      )
+    }
+    return (
+      <Suspense fallback={<DashboardLoading />}>
+        <EmployeeDashboard user={user} />
+      </Suspense>
+    )
   }
 
   // Unauthenticated — show login

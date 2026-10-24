@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { apiGet } from './api.js'
+import { apiGet, apiPatch, apiPost } from './api.js'
 import DocumentsWorkspace from './DocumentsWorkspace.jsx'
+import EmployeeAccessRequestsPage from './EmployeeAccessRequestsPage.jsx'
+import ProfileSettingsWorkspace from './ProfileSettingsWorkspace.jsx'
 import UserAvatar from './UserAvatar.jsx'
+import './EmployeeDashboard.css'
 
 const employeeNavigation = [
   { label: 'Dashboard', href: '/employee', icon: 'home' },
   { label: 'My Documents', href: '/employee/documents', icon: 'file' },
-  { label: 'Shared with Me', href: '/employee/shared', icon: 'folder' },
+  { label: 'Shared with Me', href: '/employee/shared', icon: 'users' },
   { label: 'Upload Document', href: '/employee/upload', icon: 'upload' },
   { label: 'Document Activity', href: '/employee/activity', icon: 'activity' },
-  { label: 'Access Requests', href: '/employee/requests', icon: 'inbox', badge: '3' },
+  { label: 'Access Requests', href: '/employee/requests', icon: 'inbox' },
 ]
 
 const employeeBottomNavigation = [
@@ -43,32 +46,7 @@ const sharedDocuments = [
   { name: 'Product_Roadmap.pptx', owner: 'Amit Kumar', department: 'Engineering', modified: '08 May 2025', permission: 'Download', expires: '—', size: '3.5 MB', classification: 'Internal', type: 'PPT', tone: 'bg-orange-500', description: 'Product roadmap and upcoming release milestones.', tags: ['Product', 'Roadmap'] },
 ]
 
-const activityRecords = [
-  { time: '27 May 2025 10:24 AM', action: 'Document viewed', document: 'Employee_Policy.pdf', type: 'PDF (2.4 MB)', actor: 'Amit Kumar', department: 'Engineering', outcome: 'Success', icon: 'eye', ip: '192.168.1.45' },
-  { time: '26 May 2025 03:15 PM', action: 'Document downloaded', document: 'Team_Plan.docx', type: 'DOCX (1.8 MB)', actor: 'Priya Singh', department: 'Finance', outcome: 'Success', icon: 'download', ip: '192.168.1.33' },
-  { time: '25 May 2025 01:40 PM', action: 'Access granted', document: 'Project_Requirements.pdf', type: 'PDF (2.4 MB)', actor: 'You', department: 'Owner', outcome: 'Success', icon: 'share', ip: '192.168.1.45' },
-  { time: '24 May 2025 02:30 PM', action: 'Permission changed', document: 'Financial_Report.xlsx', type: 'XLSX (3.2 MB)', actor: 'Rahul Tomar', department: 'Product', outcome: 'Success', icon: 'edit', ip: '192.168.1.56' },
-  { time: '23 May 2025 09:05 AM', action: 'New access request', document: 'Market_Analysis.pdf', type: 'PDF (1.6 MB)', actor: 'Suresh Nair', department: 'Management', outcome: 'Pending', icon: 'users', ip: '192.168.1.75' },
-  { time: '23 May 2025 04:12 PM', action: 'Access denied', document: 'Confidential_Draft.pdf', type: 'PDF (2.8 MB)', actor: 'Anita Mehta', department: 'Legal', outcome: 'Denied', icon: 'denied', ip: '192.168.1.88' },
-  { time: '20 May 2025 10:18 AM', action: 'Document uploaded', document: 'Product_Design.png', type: 'PNG (4.1 MB)', actor: 'You', department: 'Owner', outcome: 'Success', icon: 'bell', ip: '192.168.1.45' },
-  { time: '18 May 2025 02:30 PM', action: 'Access revoked', document: 'Old_Report.pdf', type: 'PDF (1.9 MB)', actor: 'You', department: 'Owner', outcome: 'Success', icon: 'share', ip: '192.168.1.45' },
-  { time: '16 May 2025 01:15 PM', action: 'Document viewed', document: 'Security_Guidelines.docx', type: 'DOCX (1.2 MB)', actor: 'Rohit Kulkarni', department: 'Operations', outcome: 'Success', icon: 'eye', ip: '192.168.1.91' },
-  { time: '14 May 2025 11:50 AM', action: 'Document downloaded', document: 'Budget_Proposal.xlsx', type: 'XLSX (2.1 MB)', actor: 'Amit Kumar', department: 'Engineering', outcome: 'Success', icon: 'download', ip: '192.168.1.33' },
-]
 
-const requestExamples = [
-  { id: 'REQ-2025-001', requester: 'Amit Kumar', department: 'Engineering', document: 'Project_Requirements.pdf', size: '2.4 MB', permission: 'Download', reason: 'Need to download for Q2 analysis.', requested: '27 May 2025 10:24 AM', status: 'Pending', expires: '30 Jun 2025', attachment: 'Q2_Analysis_Plan.pdf (120 KB)' },
-  { id: 'REQ-2025-002', requester: 'Priya Singh', department: 'Finance', document: 'Financial_Report_Q1.xlsx', size: '3.2 MB', permission: 'View', reason: 'Need access to review budget details.', requested: '26 May 2025 03:15 PM', status: 'Pending', expires: '—', attachment: '' },
-  { id: 'REQ-2025-003', requester: 'Suresh Nair', department: 'Management', document: 'Team_Guidelines.docx', size: '1.8 MB', permission: 'View', reason: 'Please share the latest team guidelines.', requested: '25 May 2025 01:40 PM', status: 'Approved', expires: '—', attachment: '' },
-  { id: 'REQ-2025-004', requester: 'Rahul Tomar', department: 'Product', document: 'Design_Mockup.png', size: '4.1 MB', permission: 'View', reason: 'Need to review product design.', requested: '23 May 2025 11:20 AM', status: 'Rejected', expires: '—', attachment: '' },
-  { id: 'REQ-2025-005', requester: 'Anita Mehta', department: 'Legal', document: 'Confidential_Draft.pdf', size: '2.8 MB', permission: 'View', reason: 'Need the draft for legal review.', requested: '18 May 2025 09:05 AM', status: 'Approved', expires: '30 Jun 2025', attachment: '' },
-  { id: 'REQ-2025-006', requester: 'Rohit Kulkarni', department: 'Operations', document: 'Budget_Proposal.xlsx', size: '2.1 MB', permission: 'View', reason: 'Please share this document for planning.', requested: '16 May 2025 02:30 PM', status: 'Approved', expires: '—', attachment: '' },
-  { id: 'REQ-2025-007', requester: 'Amit Kumar', department: 'Engineering', document: 'Product_Roadmap.pptx', size: '3.5 MB', permission: 'Download', reason: 'Need a copy for the upcoming client meeting.', requested: '14 May 2025 10:16 AM', status: 'Pending', expires: '30 Jun 2025', attachment: '' },
-  { id: 'REQ-2025-008', requester: 'Sneha Kapoor', department: 'Design', document: 'Product_Design.png', size: '4.1 MB', permission: 'View', reason: 'Need to review latest design assets.', requested: '12 May 2025 04:10 PM', status: 'Approved', expires: '—', attachment: '' },
-  { id: 'REQ-2025-009', requester: 'You', department: 'Engineering', document: 'Security_Guidelines.docx', size: '1.2 MB', permission: 'View', reason: 'I need the security guidelines for my current project.', requested: '11 May 2025 09:30 AM', status: 'Pending', expires: '—', attachment: '', isMine: true },
-  { id: 'REQ-2025-010', requester: 'You', department: 'Engineering', document: 'Team_Guidelines.docx', size: '1.8 MB', permission: 'View', reason: 'I need to review the latest team guidelines.', requested: '09 May 2025 01:45 PM', status: 'Approved', expires: '—', attachment: '', isMine: true },
-  { id: 'REQ-2025-011', requester: 'You', department: 'Engineering', document: 'Confidential_Draft.pdf', size: '2.8 MB', permission: 'View', reason: 'I need the draft for a project review.', requested: '08 May 2025 11:15 AM', status: 'Rejected', expires: '—', attachment: '', isMine: true },
-]
 
 const additionalOwnedDocuments = [
   'Sales_Overview.pdf', 'Product_Brief.docx', 'Operations_Guide.pdf', 'Hiring_Plan.xlsx',
@@ -99,12 +77,6 @@ const additionalSharedDocuments = [
   { ...sharedDocuments[1], name: 'Engineering_Roadmap.pptx', owner: 'Amit Kumar', modified: '04 May 2025', permission: 'Download', expires: '—', type: 'PPT', tone: 'bg-orange-500', size: '3.5 MB' },
 ]
 const sharedDocumentRecords = [...sharedDocuments, ...additionalSharedDocuments]
-const allActivityRecords = Array.from({ length: 48 }, (_, index) => {
-  const event = activityRecords[index % activityRecords.length]
-  if (index < activityRecords.length) return event
-  const day = 13 + ((index - activityRecords.length) % 14)
-  return { ...event, time: `${String(day).padStart(2, '0')} May 2025 10:${String(index % 60).padStart(2, '0')}:00 AM` }
-})
 
 const employeeActivities = [
   { icon: 'eye', tone: 'bg-blue-50 text-blue-700', title: 'Document viewed', detail: 'You viewed Employee_Policy.pdf', time: 'Just now' },
@@ -113,13 +85,6 @@ const employeeActivities = [
   { icon: 'edit', tone: 'bg-amber-50 text-amber-700', title: 'Permission changed', detail: 'Access to Financial_Report.xlsx was updated', time: 'Yesterday' },
   { icon: 'denied', tone: 'bg-rose-50 text-rose-700', title: 'Access denied', detail: 'A blocked access attempt to Confidential_Draft.pdf', time: 'Yesterday' },
   { icon: 'bell', tone: 'bg-amber-50 text-amber-700', title: 'New access request', detail: 'Priya Mehta requested download access to Market_Analysis.pdf', time: '2 days ago' },
-]
-
-const employeeNotifications = [
-  { icon: 'users', tone: 'bg-indigo-50 text-indigo-700', title: 'New sharing invitation', detail: 'HR Team shared Employee_Handbook.pdf with you', time: '1 hour ago' },
-  { icon: 'clock', tone: 'bg-amber-50 text-amber-700', title: 'Access request pending', detail: 'Priya Mehta requested download access to Market_Analysis.pdf', time: '3 hours ago' },
-  { icon: 'security', tone: 'bg-emerald-50 text-emerald-700', title: 'Permission revoked', detail: 'Your access to Old_Report.pdf has been revoked', time: '1 day ago' },
-  { icon: 'info', tone: 'bg-sky-50 text-sky-700', title: 'Access expiring soon', detail: 'Your access to Project_Plan.pdf will expire in 3 days', time: '2 days ago' },
 ]
 
 function EmployeeIcon({ name, className = 'h-4 w-4' }) {
@@ -154,6 +119,9 @@ function EmployeeIcon({ name, className = 'h-4 w-4' }) {
     shield: <><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z" /><path d="m9 12 2 2 4-4" /></>,
     send: <><path d="m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13" /></>,
     filter: <><path d="M4 5h16l-6.5 7.5v5l-3 1v-6L4 5Z" /></>,
+    menu: <><path d="M4 6h16M4 12h16M4 18h16" /></>,
+    chevron: <path d="m6 9 6 6 6-6" />,
+    link: <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>,
   }
 
   return (
@@ -165,50 +133,77 @@ function EmployeeIcon({ name, className = 'h-4 w-4' }) {
 
 function EmployeeBrand() {
   return (
-    <div className="flex items-center gap-2.5 px-4 py-4">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-teal-400 to-emerald-600 text-white">
+    <div className="employee-brand">
+      <span className="employee-brand-mark">
         <EmployeeIcon className="h-5 w-5" name="security" />
       </span>
       <span>
-        <span className="block text-[17px] font-bold leading-5 tracking-tight text-white">SureDocs</span>
-        <span className="block text-[8px] text-slate-300">Secure Document Sharing</span>
+        <span className="employee-brand-name">SureDocs</span>
+        <span className="employee-brand-caption">Secure Document Sharing</span>
       </span>
     </div>
   )
 }
 
-function EmployeeSidebar({ pathname }) {
+function EmployeeSidebar({ pathname, open, onClose, pendingRequestCount }) {
+  const isStorage = pathname === '/employee/storage' || pathname === '/employee/profile/storage'
+  const isConnected = pathname === '/employee/connected' || pathname === '/employee/profile/connected' || pathname === '/employee/profile/connected-accounts'
+  const isProfile = pathname.startsWith('/employee/profile') && !isStorage && !isConnected
+
+  const mainNav = isStorage
+    ? [
+        { label: 'Dashboard', href: '/employee', icon: 'home' },
+        { label: 'My Documents', href: '/employee/documents', icon: 'file' },
+        { label: 'Shared with Me', href: '/employee/shared', icon: 'users' },
+        { label: 'Upload Document', href: '/employee/upload', icon: 'upload' },
+        { label: 'Document Activity', href: '/employee/activity', icon: 'activity' },
+        { label: 'Storage', href: '/employee/storage', icon: 'clock', badge: 2 },
+      ]
+    : employeeNavigation
+
+  const bottomNav = isConnected
+    ? [
+        { label: 'Connected Accounts', href: '/employee/connected', icon: 'link' },
+        { label: 'Sign Out', href: '/', icon: 'signout' },
+      ]
+    : employeeBottomNavigation
+
   return (
-    <aside className="flex w-full shrink-0 flex-col bg-[#0c2b34] text-slate-200 lg:fixed lg:inset-y-0 lg:left-0 lg:w-[180px]">
+    <aside aria-label="Employee sidebar" className={`employee-sidebar ${open ? 'employee-sidebar--open' : ''}`}>
       <EmployeeBrand />
-      <nav aria-label="Employee navigation" className="flex gap-1 overflow-x-auto px-2 pb-3 lg:flex-col lg:overflow-visible">
-        {employeeNavigation.map((item) => {
+      <nav aria-label="Employee navigation" className="employee-nav">
+        {mainNav.map((item) => {
           const active = item.href === '/employee'
             ? pathname === '/employee' || pathname === '/employee/dashboard'
-            : pathname.startsWith(item.href)
+            : isStorage && item.href === '/employee/storage'
+              ? true
+              : pathname.startsWith(item.href)
           return (
             <a
               aria-current={active ? 'page' : undefined}
-              className={`flex shrink-0 items-center gap-2.5 rounded-md px-2.5 py-2 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 ${
-                active ? 'bg-[#105b59] text-white' : 'text-slate-200 hover:bg-white/10 hover:text-white'
-              }`}
+              className={`employee-nav-link ${active ? 'employee-nav-link--active' : ''}`}
               href={item.href}
               key={item.href}
+              onClick={onClose}
             >
-              <EmployeeIcon className="h-4 w-4" name={item.icon} />
-              <span className="flex-1">{item.label}</span>
-              {item.badge && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[8px] font-bold text-white">{item.badge}</span>}
+              <EmployeeIcon className="employee-nav-icon" name={item.icon} />
+              <span className="employee-nav-label">{item.label}</span>
+              {item.href === '/employee/requests' && pendingRequestCount > 0 && <span className="employee-nav-badge">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</span>}
             </a>
           )
         })}
       </nav>
-      <nav aria-label="Account navigation" className="mt-2 flex gap-1 border-t border-white/10 px-2 pt-3 lg:mt-auto lg:flex-col lg:pb-4">
-        {employeeBottomNavigation.map((item) => {
-          const active = item.href !== '/' && pathname.startsWith(item.href)
+      <nav aria-label="Account navigation" className="employee-nav employee-nav--account">
+        {bottomNav.map((item) => {
+          const active = isConnected && item.href === '/employee/connected'
+            ? true
+            : isProfile && item.href === '/employee/profile'
+              ? true
+              : item.href !== '/' && pathname.startsWith(item.href)
           return (
-            <a className={`flex shrink-0 items-center gap-2.5 rounded-md px-2.5 py-2 text-[10px] font-medium hover:bg-white/10 hover:text-white ${active ? 'bg-[#105b59] text-white' : 'text-slate-200'}`} href={item.href} key={item.href}>
-              <EmployeeIcon className="h-4 w-4" name={item.icon} />
-              {item.label}
+            <a className={`employee-nav-link ${active ? 'employee-nav-link--active' : ''}`} href={item.href} key={item.href} onClick={onClose}>
+              <EmployeeIcon className="employee-nav-icon" name={item.icon} />
+              <span className="employee-nav-label">{item.label}</span>
             </a>
           )
         })}
@@ -217,53 +212,114 @@ function EmployeeSidebar({ pathname }) {
   )
 }
 
-function EmployeeTopBar({ user, notificationsOpen, setNotificationsOpen, unreadCount, search, onSearchChange }) {
-  const searchProps = search === undefined ? {} : { onChange: onSearchChange, value: search }
-  const initial = user?.full_name?.trim().charAt(0) || user?.email?.trim().charAt(0) || 'U'
-  const displayName = user?.full_name || 'Employee'
-  const displayRole = user?.job_title || user?.role || 'Employee'
+function notificationHref(notification) {
+  if (notification.notification_type === 'ACCESS_REQUEST') return '/employee/requests'
+  if (notification.document_id) return `/employee/shared?documentId=${encodeURIComponent(notification.document_id)}`
+  return '/employee/notifications'
+}
+
+function EmployeeNotificationList({ items, status, error, onMarkRead, compact = false }) {
+  if (status === 'loading' && items.length === 0) {
+    return <p className="employee-notification-empty" role="status">Loading notifications…</p>
+  }
+  if (status === 'error' && items.length === 0) {
+    return <p className="employee-notification-empty" role="alert">{error || 'Notifications could not be loaded.'}</p>
+  }
+  if (items.length === 0) {
+    return <p className="employee-notification-empty" role="status">No notifications yet.</p>
+  }
 
   return (
-    <header className="flex min-h-[48px] items-center gap-4 border-b border-slate-200 bg-white px-4 sm:px-5">
-      <label className="relative hidden w-full max-w-[380px] sm:block">
+    <ul className={`employee-notification-list${compact ? ' employee-notification-list--compact' : ''}`}>
+      {items.map((item) => (
+        <li className={`employee-notification-item${item.read_at ? '' : ' is-unread'}`} key={item.id}>
+          <a className="employee-notification-link" href={notificationHref(item)}>
+            <span className="employee-notification-title">{item.title}</span>
+            <span className="employee-notification-message">{item.message}</span>
+            <time dateTime={item.created_at}>{formatRelativeTime(item.created_at)}</time>
+          </a>
+          {!item.read_at && onMarkRead && (
+            <button aria-label={`Mark ${item.title} as read`} className="employee-notification-mark-read" onClick={() => onMarkRead(item.id)} type="button">Mark read</button>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function EmployeeTopBar({
+  user,
+  notificationsOpen,
+  setNotificationsOpen,
+  search,
+  onSearchChange,
+  notifications = [],
+  unreadCount = 0,
+  notificationStatus = 'loading',
+  notificationError = '',
+  notificationActionError = '',
+  onMarkRead,
+  onMarkAllRead,
+  onRefreshNotifications,
+}) {
+  const [profileOpen, setProfileOpen] = useState(false)
+  const searchProps = search === undefined ? {} : { onChange: onSearchChange, value: search }
+  const displayName = user?.full_name || user?.email || 'Employee'
+  const displayRole = user?.role === 'ADMIN'
+    ? 'Platform Administrator'
+    : user?.role === 'MANAGER'
+      ? 'Manager'
+      : user?.job_title || user?.department || 'Employee'
+
+  return (
+    <header className="employee-topbar">
+      <button aria-label="Open navigation" className="employee-menu-toggle" onClick={() => window.dispatchEvent(new Event('suredocs:toggle-employee-nav'))} type="button">
+        <EmployeeIcon className="h-5 w-5" name="menu" />
+      </button>
+      <label className={`employee-search ${search === undefined ? 'employee-search--hidden' : ''}`}>
         <span className="sr-only">Search documents</span>
-        <EmployeeIcon className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" name="search" />
-        <input className="h-8 w-full rounded-md border border-slate-200 bg-slate-50 pl-8 pr-3 text-[9px] outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" placeholder="Search documents, owners, or keywords..." type="search" {...searchProps} />
+        <EmployeeIcon className="employee-search-icon" name="search" />
+        <input placeholder="Search documents, owners, or keywords..." type="search" {...searchProps} />
       </label>
-      <div className="ml-auto flex items-center gap-3">
-        <div className="relative">
-          <button aria-expanded={notificationsOpen} aria-label={`Notifications, ${unreadCount} unread`} className="relative rounded-md p-1.5 text-[#125b63] hover:bg-slate-100" onClick={() => setNotificationsOpen((open) => !open)} type="button">
-            <EmployeeIcon className="h-4 w-4" name="bell" />
-            {unreadCount > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-rose-500 px-0.5 text-[7px] font-bold text-white">{unreadCount}</span>}
+      <div className="employee-topbar-actions">
+        <div className="employee-popover-anchor">
+          <button aria-expanded={notificationsOpen} aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'} className="employee-topbar-icon-button" onClick={() => {
+            const opening = !notificationsOpen
+            setNotificationsOpen(opening)
+            if (opening) onRefreshNotifications?.()
+          }} type="button">
+            <EmployeeIcon className="h-5 w-5" name="bell" />
+            {unreadCount > 0 && <span aria-hidden="true" className="employee-notification-count">{unreadCount > 99 ? '99+' : unreadCount}</span>}
           </button>
           {notificationsOpen && (
-            <div className="absolute right-0 top-9 z-20 w-[min(320px,calc(100vw-24px))] rounded-lg border border-slate-200 bg-white p-3 shadow-xl">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-semibold text-slate-800">Notifications</h2>
-                <span className="text-[9px] text-slate-500">{unreadCount} unread</span>
+            <div className="employee-popover">
+              <div className="employee-popover-heading">
+                <strong>Notifications</strong>
+                {unreadCount > 0 && <button disabled={notificationStatus === 'loading'} onClick={onMarkAllRead} type="button">Mark all read</button>}
               </div>
-              <ul className="mt-2 space-y-2">
-                {employeeNotifications.slice(0, 3).map((notification) => (
-                  <li className="border-t border-slate-100 pt-2" key={notification.title}>
-                    <p className="text-[9px] font-semibold text-slate-700">{notification.title}</p>
-                    <p className="mt-0.5 text-[8px] text-slate-500">{notification.detail}</p>
-                  </li>
-                ))}
-              </ul>
+              <p className="employee-popover-unread-count">{unreadCount} unread</p>
+              {notificationActionError && <p className="employee-notification-error" role="alert">{notificationActionError}</p>}
+              <EmployeeNotificationList compact error={notificationError} items={notifications.slice(0, 4)} onMarkRead={onMarkRead} status={notificationStatus} />
+              <a className="employee-popover-view-all" href="/employee/notifications">View all notifications</a>
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
-          <UserAvatar
-            className="h-7 w-7 bg-[#0e8290] text-[9px] text-white"
-            email={user?.email}
-            fullName={user?.full_name}
-          />
-          <span className="hidden sm:block">
-            <span className="block text-[9px] font-semibold text-slate-800">{displayName}</span>
-            <span className="block text-[8px] text-slate-500">{displayRole}</span>
-          </span>
-          <span aria-hidden="true" className="hidden text-slate-500 sm:block">⌄</span>
+        <span aria-hidden="true" className="employee-topbar-divider" />
+        <div className="employee-profile-menu">
+          <button aria-expanded={profileOpen} className="employee-profile-trigger" onClick={() => setProfileOpen((open) => !open)} type="button">
+            <UserAvatar className="employee-topbar-avatar" email={user?.email} fullName={displayName} />
+            <span className="employee-profile-copy">
+              <span className="employee-profile-name">{displayName}</span>
+              <span className="employee-profile-role">{displayRole}</span>
+            </span>
+            <EmployeeIcon className="employee-profile-chevron" name="chevron" />
+          </button>
+          {profileOpen && (
+            <div className="employee-profile-popover">
+              <a href="/employee/profile" onClick={() => setProfileOpen(false)}>Profile &amp; Settings</a>
+              <a href="/" onClick={() => setProfileOpen(false)}>Sign Out</a>
+            </div>
+          )}
         </div>
       </div>
     </header>
@@ -272,232 +328,350 @@ function EmployeeTopBar({ user, notificationsOpen, setNotificationsOpen, unreadC
 
 function QuickLink({ href, icon, title, detail, primary = false }) {
   return (
-    <a className={`group flex min-h-[54px] items-center gap-3 rounded-lg border px-3 py-2 transition hover:-translate-y-0.5 hover:shadow-sm ${primary ? 'border-[#07847d] bg-[#07847d] text-white hover:bg-[#08756f]' : 'border-slate-200 bg-white text-slate-800 hover:border-teal-200'}`} href={href}>
-      <EmployeeIcon className={`h-6 w-6 shrink-0 ${primary ? 'text-white' : 'text-[#176777]'}`} name={icon} />
-      <span className="min-w-0">
-        <span className="block truncate text-[10px] font-semibold">{title}</span>
-        <span className={`mt-0.5 block truncate text-[8px] ${primary ? 'text-teal-50' : 'text-slate-500'}`}>{detail}</span>
+    <a className={`employee-quick-link ${primary ? 'employee-quick-link--primary' : ''}`} href={href}>
+      <EmployeeIcon className="employee-quick-link-icon" name={icon} />
+      <span className="employee-quick-link-copy">
+        <span className="employee-quick-link-title">{title}</span>
+        <span className="employee-quick-link-detail">{detail}</span>
       </span>
     </a>
   )
 }
 
 function EmployeeDocumentIcon({ document }) {
-  return (
-    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded ${document.tone} text-[6px] font-bold text-white`}>
-      {document.type}
-    </span>
-  )
+  return <span className={`employee-document-icon employee-document-icon--${document.type.toLowerCase()}`}>{document.type}</span>
 }
 
-function PanelHeading({ title, href, linkText = 'View All' }) {
+function PanelHeading({ title, href, linkText = 'View all', action }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <h2 className="text-[11px] font-semibold text-slate-800">{title}</h2>
-      <a className="whitespace-nowrap text-[8px] font-semibold text-blue-600 hover:text-blue-800" href={href}>{linkText}</a>
+    <div className="employee-panel-heading">
+      <h2>{title}</h2>
+      {action || (href && <a href={href}>{linkText}</a>)}
     </div>
   )
 }
 
-function EmployeeDashboardContent({ user }) {
+function formatRelativeTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000))
+  if (seconds < 60) return 'Just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`
+  if (seconds < 172800) return 'Yesterday'
+  return date.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+}
+
+function formatDocumentDate(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  const today = new Date()
+  if (date.toDateString() === today.toDateString()) {
+    return `Today, ${date.toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' })}`
+  }
+  return date.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function activityLabel(actionType) {
+  const labels = {
+    DOCUMENT_VIEWED: 'Document viewed',
+    DOCUMENT_DOWNLOADED: 'Document downloaded',
+    ACCESS_GRANTED: 'Access granted',
+    PERMISSION_UPDATED: 'Permission changed',
+    PERMISSION_REVOKED: 'Permission revoked',
+    ACCESS_DENIED: 'Access denied',
+    DOCUMENT_CREATED: 'Document uploaded',
+    DOCUMENT_UPDATED: 'Document updated',
+    DOCUMENT_DELETED: 'Document deleted',
+  }
+  return labels[actionType] || actionType.replaceAll('_', ' ').toLowerCase().replace(/^./, (letter) => letter.toUpperCase())
+}
+
+function activityIcon(actionType) {
+  if (actionType.includes('DENIED') || actionType.includes('REVOKED')) return 'denied'
+  if (actionType.includes('DOWNLOAD')) return 'download'
+  if (actionType.includes('ACCESS_GRANTED')) return 'share'
+  if (actionType.includes('PERMISSION')) return 'edit'
+  if (actionType.includes('VIEWED')) return 'eye'
+  if (actionType.includes('CREATED')) return 'upload'
+  return 'file'
+}
+
+function activityTone(actionType) {
+  if (actionType.includes('DENIED') || actionType.includes('REVOKED')) return 'is-error'
+  if (actionType.includes('ACCESS_GRANTED')) return 'is-success'
+  if (actionType.includes('PERMISSION')) return 'is-warning'
+  return 'is-info'
+}
+
+async function getDistinctSharedDocumentCount(documents, signal) {
+  if (documents.length > 40) return null
+  const results = new Array(documents.length)
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < documents.length) {
+      const index = nextIndex++
+      try {
+        results[index] = await apiGet(`/api/documents/${documents[index].id}/permissions`, { signal })
+      } catch (error) {
+        if (error.name === 'AbortError') throw error
+        results[index] = null
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, documents.length) }, worker))
+  if (results.some((result) => result === null)) return null
+  return results.filter((result) => result.items.some((permission) => permission.is_effective)).length
+}
+
+async function fetchOwnedAuditEvents(documents, signal) {
+  const scopedDocuments = documents.slice(0, 40)
+  const results = new Array(scopedDocuments.length)
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < scopedDocuments.length) {
+      const index = nextIndex++
+      try {
+        const response = await apiGet(`/api/documents/${scopedDocuments[index].id}/audit`, { signal })
+        results[index] = response.items.map((event) => ({ ...event, document: scopedDocuments[index] }))
+      } catch (error) {
+        if (error.name === 'AbortError') throw error
+        results[index] = null
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, scopedDocuments.length) }, worker))
+  const events = results.flatMap((result) => result || [])
+  events.sort((left, right) => new Date(right.occurred_at) - new Date(left.occurred_at))
+  return {
+    events,
+    partial: documents.length > scopedDocuments.length || results.some((result) => result === null),
+    failed: results.filter((result) => result === null).length,
+  }
+}
+
+function EmployeeDashboardContent({ user, notificationProps, notificationsOpen, setNotificationsOpen, pendingRequestCounts }) {
   const [search, setSearch] = useState('')
   const [myDocuments, setMyDocuments] = useState([])
+  const [sharedDocuments, setSharedDocuments] = useState([])
   const [documentSummary, setDocumentSummary] = useState(null)
+  const [sharedOwnedCount, setSharedOwnedCount] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(true)
   const [documentError, setDocumentError] = useState('')
-  const [notifications, setNotifications] = useState(employeeNotifications)
-  const [unreadCount, setUnreadCount] = useState(5)
-  const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const filteredDocuments = useMemo(() => myDocuments.filter((document) =>
+  const [documentsLoading, setDocumentsLoading] = useState(true)
+  const [activity, setActivity] = useState([])
+  const [activityState, setActivityState] = useState('loading')
+  const [openActionId, setOpenActionId] = useState('')
+  const [profileError, setProfileError] = useState(false)
+  const accessibleDocuments = useMemo(() => [...myDocuments, ...sharedDocuments]
+    .sort((left, right) => new Date(right.updated_at) - new Date(left.updated_at)), [myDocuments, sharedDocuments])
+  const filteredDocuments = useMemo(() => accessibleDocuments.filter((document) =>
     `${document.title} ${document.original_filename ?? ''} ${document.owner_name}`
       .toLowerCase()
-      .includes(search.toLowerCase()),
-  ), [myDocuments, search])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    Promise.all([
-      apiGet('/api/documents/my', { signal: controller.signal }),
-      apiGet('/api/documents/summary', { signal: controller.signal }),
-    ])
-      .then(([owned, summary]) => {
-        setMyDocuments(owned.items)
-        setDocumentSummary(summary)
-      })
-      .catch((requestError) => {
-        if (requestError.name !== 'AbortError') setDocumentError(requestError.message)
-      })
-    return () => controller.abort()
-  }, [])
-
+      .includes(search.trim().toLowerCase()),
+  ), [accessibleDocuments, search])
   const firstName = user?.full_name?.trim().split(/\s+/)[0] || 'there'
-  const hour = new Date().getHours()
+  const [renderedAt] = useState(() => new Date())
+  const hour = renderedAt.getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-  const todayLabel = new Date().toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-
+  const todayLabel = renderedAt.toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
   const quickLinks = [
     { href: '/employee/upload', icon: 'upload', title: 'Upload Document', detail: 'Add a new document', primary: true },
     { href: '/employee/documents', icon: 'folder', title: 'My Documents', detail: 'View and manage your files' },
     { href: '/employee/shared', icon: 'users', title: 'Shared with Me', detail: 'Access documents shared with you' },
-    { href: '/employee/permissions', icon: 'share', title: 'Sharing & Permissions', detail: 'Manage access to your documents' },
-  ]
-  const metricCards = [
-    { icon: 'file', value: documentSummary ? String(documentSummary.owned_documents) : '—', label: 'My Documents', detail: 'Owned by you', tone: 'bg-teal-50 text-emerald-700', badge: 'bg-emerald-100' },
-    { icon: 'folder', value: documentSummary ? String(documentSummary.shared_with_me) : '—', label: 'Shared with Me', detail: 'Available to access', tone: 'bg-blue-50 text-blue-700', badge: 'bg-blue-100' },
-    { icon: 'users', value: documentSummary ? String(documentSummary.shared_by_me) : '—', label: 'Documents I Share', detail: 'Owned and shared by you', tone: 'bg-violet-50 text-violet-700', badge: 'bg-violet-100' },
-    { icon: 'clock', value: '3', label: 'Pending Requests', detail: 'Requiring your attention', tone: 'bg-amber-50 text-amber-700', badge: 'bg-amber-100' },
+    { href: '/employee/documents', icon: 'share', title: 'Sharing & Permissions', detail: 'Manage access to your documents' },
   ]
 
-  function markNotificationsRead() {
-    setNotifications([])
-    setUnreadCount(0)
-    setNotificationsOpen(false)
-  }
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    async function loadDashboard() {
+      const [ownedResult, sharedResult, summaryResult, profileResult] = await Promise.allSettled([
+        apiGet('/api/documents/my', { signal: controller.signal }),
+        apiGet('/api/documents/shared', { signal: controller.signal }),
+        apiGet('/api/documents/summary', { signal: controller.signal }),
+        apiGet('/api/users/me/profile', { signal: controller.signal }),
+      ])
+      if (!active) return
+      const owned = ownedResult.status === 'fulfilled' ? ownedResult.value.items : []
+      const shared = sharedResult.status === 'fulfilled' ? sharedResult.value.items : []
+      setMyDocuments(owned)
+      setSharedDocuments(shared)
+      setDocumentSummary(summaryResult.status === 'fulfilled' ? summaryResult.value : null)
+      setProfile(profileResult.status === 'fulfilled' ? profileResult.value : null)
+      setProfileError(profileResult.status === 'rejected')
+      setProfileLoading(false)
+      setDocumentsLoading(false)
+      if (ownedResult.status === 'rejected' || sharedResult.status === 'rejected') {
+        setDocumentError(ownedResult.status === 'rejected' ? ownedResult.reason.message : sharedResult.reason.message)
+      }
+      if (ownedResult.status === 'fulfilled') {
+        const sharedCount = await getDistinctSharedDocumentCount(owned, controller.signal)
+        if (active) setSharedOwnedCount(sharedCount)
+      }
+      if (ownedResult.status === 'rejected') {
+        if (active) setActivityState('unavailable')
+        return
+      }
+      if (owned.length === 0) {
+        if (active) setActivityState('empty')
+        return
+      }
+      const auditResults = await Promise.allSettled(owned.slice(0, 8).map((document) =>
+        apiGet(`/api/documents/${document.id}/audit`, { signal: controller.signal }),
+      ))
+      if (!active) return
+      const events = auditResults.flatMap((result, index) => result.status === 'fulfilled'
+        ? result.value.items.map((event) => ({ ...event, document: owned[index] }))
+        : [])
+      events.sort((left, right) => new Date(right.occurred_at) - new Date(left.occurred_at))
+      setActivity(events.slice(0, 6))
+      setActivityState(events.length ? 'ready' : auditResults.some((result) => result.status === 'fulfilled') ? 'empty' : 'unavailable')
+    }
+    loadDashboard().catch((error) => {
+      if (active && error.name !== 'AbortError') setActivityState('unavailable')
+    })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [])
+
+  const metricCards = [
+    { icon: 'file', value: documentSummary ? documentSummary.owned_documents : '—', label: 'My Documents', detail: 'Owned by you', tone: 'is-lavender', href: '/employee/documents' },
+    { icon: 'folder', value: documentSummary ? documentSummary.shared_with_me : '—', label: 'Shared with Me', detail: 'Available to access', tone: 'is-blue', href: '/employee/shared' },
+    { icon: 'users', value: sharedOwnedCount ?? '—', label: 'Documents I Share', detail: sharedOwnedCount === null ? 'Share total unavailable' : 'Owned and shared by you', tone: 'is-violet', href: '/employee/documents' },
+    { icon: 'clock', value: pendingRequestCounts.loading ? '…' : pendingRequestCounts.owned ?? '—', label: 'Pending Requests', detail: 'Awaiting your review', tone: 'is-amber', href: '/employee/requests' },
+  ]
+  const accountStatus = profile?.account_status?.toLowerCase() || ''
+  const accountStatusLabel = accountStatus ? accountStatus[0].toUpperCase() + accountStatus.slice(1) : 'Unavailable'
 
   return (
-    <>
+    <div className="employee-dashboard-page">
       <EmployeeTopBar
+        {...notificationProps}
         user={user}
         notificationsOpen={notificationsOpen}
         onSearchChange={(event) => setSearch(event.target.value)}
         search={search}
         setNotificationsOpen={setNotificationsOpen}
-        unreadCount={unreadCount}
       />
-      <main className="mx-auto max-w-[1600px] space-y-3 px-4 pb-5 pt-4 sm:px-5 lg:px-5">
-        <section className="flex flex-wrap items-start justify-between gap-2">
+      <main className="employee-dashboard-main">
+        <section className="employee-welcome">
           <div>
-            <h1 className="text-[20px] font-bold tracking-tight text-slate-900">{greeting}, {firstName}!</h1>
-            <p className="mt-0.5 text-[10px] text-slate-600">Your secure workspace for documents, sharing and access activity.</p>
+            <h1>{greeting}, {firstName}!</h1>
+            <p>Your secure workspace for documents, sharing and access activity.</p>
           </div>
-          <div className="text-left text-[8px] text-slate-500 sm:text-right">
-            <p className="font-semibold text-slate-600">{todayLabel}</p>
-            <p className="mt-0.5">Stay productive and secure with SureDocs.</p>
-          </div>
+          <time dateTime={renderedAt.toISOString()}>{todayLabel}</time>
         </section>
 
-        <section aria-label="Employee quick links" className="grid grid-cols-1 gap-2 min-[520px]:grid-cols-2 lg:grid-cols-4">
+        <section aria-label="Employee quick links" className="employee-quick-links">
           {quickLinks.map((link) => <QuickLink {...link} key={link.title} />)}
         </section>
 
-        <section aria-label="Document summary" className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-          {metricCards.map((card) => (
-            <a className={`flex min-h-[76px] items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 ${card.tone}`} href={card.label === 'Shared with Me' ? '/employee/shared' : card.label === 'Pending Requests' ? '/employee/requests' : '/employee/documents'} key={card.label}>
-              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${card.badge}`}>
-                <EmployeeIcon className="h-5 w-5" name={card.icon} />
+        <section aria-label="Document summary" className="employee-metrics">
+          {metricCards.map((card) => {
+            const content = <>
+              <span className="employee-metric-icon"><EmployeeIcon name={card.icon} /></span>
+              <span className="employee-metric-copy">
+                <span className="employee-metric-value">{documentsLoading ? '…' : card.value}</span>
+                <span className="employee-metric-label">{card.label}</span>
+                <span className="employee-metric-detail">{card.detail}</span>
               </span>
-              <span className="min-w-0">
-                <span className="block text-[21px] font-bold leading-6 text-slate-900">{card.value}</span>
-                <span className="block truncate text-[10px] font-semibold text-slate-800">{card.label}</span>
-                <span className="mt-0.5 block truncate text-[8px] text-slate-500">{card.detail}</span>
-              </span>
-            </a>
-          ))}
+            </>
+            return card.href
+              ? <a className={`employee-metric-card ${card.tone}`} href={card.href} key={card.label}>{content}</a>
+              : <div className={`employee-metric-card ${card.tone}`} key={card.label}>{content}</div>
+          })}
         </section>
-        {documentError && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{documentError}</p>}
+        {documentError && <p className="employee-dashboard-error" role="alert">Documents could not be loaded: {documentError}</p>}
 
-        <div className="grid grid-cols-1 items-start gap-2 lg:grid-cols-[1.05fr_0.9fr]">
-          <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="employee-dashboard-panels employee-dashboard-panels--primary">
+          <section className="employee-panel employee-documents-panel">
             <PanelHeading href="/employee/documents" title="Recent Documents" />
-            <div className="mt-2 overflow-x-auto">
-              <table className="w-full min-w-[400px] border-collapse text-left">
-                <thead className="bg-slate-50">
-                  <tr className="text-[8px] font-semibold text-slate-500">
-                    <th className="px-2 py-2">Name</th>
-                    <th className="px-2 py-2">Owner</th>
-                    <th className="px-2 py-2">Last Modified</th>
-                    <th className="px-2 py-2">Access</th>
-                    <th className="w-8 px-2 py-2 text-center">Actions</th>
-                  </tr>
-                </thead>
+            <div className="employee-table-wrap">
+              <table className="employee-documents-table">
+                <thead><tr><th>Name</th><th>Owner</th><th>Last Modified</th><th>Access</th><th className="employee-actions-cell">Actions</th></tr></thead>
                 <tbody>
-                  {filteredDocuments.map((document) => (
-                    <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60" key={document.id}>
-                      <td className="px-2 py-2">
-                        <span className="flex items-center gap-2">
-                          <EmployeeDocumentIcon document={{ type: document.original_filename?.split('.').pop()?.toUpperCase() ?? 'FILE', tone: 'bg-blue-600' }} />
-                          <span className="whitespace-nowrap text-[8px] font-medium text-slate-700">{document.title}</span>
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-2 text-[8px] text-slate-500">{document.owner_name}</td>
-                      <td className="whitespace-nowrap px-2 py-2 text-[8px] text-slate-500">{new Date(document.updated_at).toLocaleDateString()}</td>
-                      <td className="px-2 py-2"><span className="rounded-full bg-emerald-100 px-2 py-1 text-[7px] font-semibold text-emerald-800">Owner</span></td>
-                      <td className="px-2 py-2 text-center"><a aria-label={`Open ${document.title}`} className="rounded p-1 text-blue-700 hover:bg-blue-50" href="/employee/documents"><EmployeeIcon className="h-3.5 w-3.5" name="arrow" /></a></td>
-                    </tr>
-                  ))}
-                  {filteredDocuments.length === 0 && <tr><td className="px-2 py-6 text-center text-[9px] text-slate-500" colSpan={5}>No documents match your search.</td></tr>}
+                  {filteredDocuments.slice(0, 4).map((document) => {
+                    const filename = document.original_filename || document.title
+                    const type = filename.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'
+                    const target = `${document.is_owner ? '/employee/documents' : '/employee/shared'}?documentId=${encodeURIComponent(document.id)}`
+                    return (
+                      <tr key={document.id}>
+                        <td><a className="employee-document-name" href={target}><EmployeeDocumentIcon document={{ type }} />{document.title}</a></td>
+                        <td>{document.is_owner ? 'You' : document.owner_name}</td>
+                        <td>{formatDocumentDate(document.updated_at)}</td>
+                        <td><span className={`employee-access-pill ${document.is_owner ? 'is-owner' : 'is-shared'}`}>{document.is_owner ? 'Owner' : 'Shared'}</span></td>
+                        <td className="employee-actions-cell">
+                          <div className="employee-document-action">
+                            <button aria-expanded={openActionId === document.id} aria-label={`Actions for ${document.title}`} className="employee-more-button" onClick={() => setOpenActionId((current) => current === document.id ? '' : document.id)} type="button"><EmployeeIcon className="h-4 w-4" name="more" /></button>
+                            {openActionId === document.id && <div className="employee-document-menu"><a href={target}>Open document library</a></div>}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {!documentsLoading && filteredDocuments.length === 0 && <tr><td className="employee-table-empty" colSpan={5}>{search ? 'No accessible documents match your search.' : documentError ? 'Document list unavailable.' : 'No documents yet.'}</td></tr>}
+                  {documentsLoading && <tr><td className="employee-table-empty" colSpan={5}>Loading your documents…</td></tr>}
                 </tbody>
               </table>
             </div>
           </section>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <section className="employee-panel employee-activity-panel">
             <PanelHeading href="/employee/activity" title="Recent Activity" />
-            <ul className="mt-1 divide-y divide-slate-100">
-              {employeeActivities.map((activity) => (
-                <li className="flex items-center gap-2 py-1.5" key={activity.title}>
-                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${activity.tone}`}><EmployeeIcon className="h-3.5 w-3.5" name={activity.icon} /></span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[8px] font-semibold text-slate-800">{activity.title}</span>
-                    <span className="mt-0.5 block truncate text-[7px] text-slate-500">{activity.detail}</span>
-                  </span>
-                  <span className="whitespace-nowrap text-[7px] text-slate-500">{activity.time}</span>
-                </li>
-              ))}
-            </ul>
+            {activityState === 'ready' ? (
+              <ul className="employee-activity-list">
+                {activity.map((event) => {
+                  const label = activityLabel(event.action_type)
+                  const actor = event.actor_user_id === user?.id ? 'You' : event.actor_name || 'A user'
+                  return <li key={event.id}>
+                    <a className="employee-activity-row" href={`/employee/activity?eventId=${encodeURIComponent(event.id)}`}>
+                      <span className={`employee-activity-icon ${activityTone(event.action_type)}`}><EmployeeIcon name={activityIcon(event.action_type)} /></span>
+                      <span className="employee-activity-copy"><strong>{label}</strong><span>{actor} · {event.document.title}</span></span>
+                      <time>{formatRelativeTime(event.occurred_at)}</time>
+                    </a>
+                  </li>
+                })}
+              </ul>
+            ) : <div className="employee-panel-empty" role="status">{activityState === 'loading' ? 'Loading activity…' : activityState === 'empty' ? 'No activity is recorded for your documents yet.' : 'Activity data is unavailable.'}</div>}
           </section>
         </div>
 
-        <div className="grid grid-cols-1 items-start gap-2 lg:grid-cols-[1.05fr_0.9fr]">
-          <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="flex items-center justify-between gap-2">
-              <PanelHeading href="/employee/notifications" title="Notifications" />
-              <button className="text-[7px] font-medium text-blue-600 hover:text-blue-800" onClick={markNotificationsRead} type="button">Mark all read</button>
-            </div>
-            <ul className="mt-1 divide-y divide-slate-100">
-              {notifications.map((notification) => (
-                <li className="flex items-center gap-2 py-1.5" key={notification.title}>
-                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${notification.tone}`}><EmployeeIcon className="h-3.5 w-3.5" name={notification.icon} /></span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1 text-[8px] font-semibold text-slate-800">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />{notification.title}
-                    </span>
-                    <span className="mt-0.5 block truncate text-[7px] text-slate-500">{notification.detail}</span>
-                  </span>
-                  <span className="whitespace-nowrap text-[7px] text-slate-500">{notification.time}</span>
-                </li>
-              ))}
-              {notifications.length === 0 && <li className="py-4 text-center text-[8px] text-slate-500">You&apos;re all caught up.</li>}
-            </ul>
+        <div className="employee-dashboard-panels employee-dashboard-panels--secondary">
+          <section className="employee-panel employee-notifications-panel">
+            <PanelHeading
+              href="/employee/notifications"
+              title="Notifications"
+              action={<div className="employee-notification-actions"><a href="/employee/notifications">View all</a><span aria-hidden="true" /><button disabled={notificationProps.unreadCount === 0 || notificationProps.notificationStatus === 'loading'} onClick={notificationProps.onMarkAllRead} type="button">Mark all read</button></div>}
+            />
+            {notificationProps.notificationActionError && <p className="employee-notification-error" role="alert">{notificationProps.notificationActionError}</p>}
+            <EmployeeNotificationList error={notificationProps.notificationError} items={notificationProps.notifications.slice(0, 4)} onMarkRead={notificationProps.onMarkRead} status={notificationProps.notificationStatus} />
           </section>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-            <PanelHeading href="/employee/profile" linkText="View Details" title="Access Summary" />
-            <div className="mt-2 flex items-center gap-3 rounded-md bg-emerald-50 px-3 py-2.5">
-              <EmployeeIcon className="h-7 w-7 shrink-0 text-emerald-700" name="security" />
-              <span>
-                <span className="block text-[9px] font-semibold text-emerald-800">Your account is active</span>
-                <span className="mt-0.5 block text-[7px] text-slate-600">All security settings are up to date.</span>
-              </span>
+          <section className="employee-panel employee-access-panel">
+            <PanelHeading href="/employee/profile" linkText="View details" title="Access Summary" />
+            <div className="employee-account-status">
+              <EmployeeIcon className="employee-account-shield" name="security" />
+              <span><strong>{profileLoading ? 'Loading account status…' : profileError ? 'Account status unavailable' : `Your account is ${accountStatus || 'unavailable'}`}</strong><span>{profile ? `Account status: ${accountStatusLabel}` : profileLoading ? 'Loading your SureDocs profile.' : 'Account details could not be loaded.'}</span></span>
             </div>
-            <div className="mt-2 grid grid-cols-3 gap-1.5">
+            <div className="employee-access-metrics">
               {[
-                { icon: 'clock', value: '2', detail: 'Documents expiring soon', tone: 'bg-amber-50 text-amber-700' },
-                { icon: 'users', value: '1', detail: 'Pending approval (as owner)', tone: 'bg-indigo-50 text-indigo-700' },
-                { icon: 'file', value: '0', detail: 'Your pending requests', tone: 'bg-sky-50 text-sky-700' },
-              ].map((item) => (
-                <div className="flex min-h-[52px] items-start gap-1.5 rounded-md border border-slate-100 p-2" key={item.detail}>
-                  <EmployeeIcon className={`h-4 w-4 shrink-0 ${item.tone.split(' ')[1]}`} name={item.icon} />
-                  <span>
-                    <span className="block text-[12px] font-semibold leading-3 text-slate-800">{item.value}</span>
-                    <span className="mt-1 block text-[7px] leading-3 text-slate-500">{item.detail}</span>
-                  </span>
-                </div>
-              ))}
+                { icon: 'clock', value: '—', detail: 'Documents expiring soon', tone: 'is-amber' },
+                { icon: 'users', value: pendingRequestCounts.loading ? '…' : pendingRequestCounts.owned ?? '—', detail: 'Pending approval (as owner)', tone: 'is-violet' },
+                { icon: 'file', value: pendingRequestCounts.loading ? '…' : pendingRequestCounts.mine ?? '—', detail: 'Your pending requests', tone: 'is-blue' },
+              ].map((item) => <div className="employee-access-metric" key={item.detail}>
+                <EmployeeIcon className={item.tone} name={item.icon} />
+                <span><strong>{item.value}</strong><span>{item.detail}</span></span>
+              </div>)}
             </div>
+            <p className="employee-access-note">{pendingRequestCounts.error ? 'Some pending request totals could not be loaded.' : 'Pending request totals are loaded from your access request records.'} Document expiry totals are not configured.</p>
           </section>
         </div>
       </main>
-    </>
+    </div>
   )
 }
 
@@ -1002,21 +1176,44 @@ function UploadDocumentPage({ user }) {
   )
 }
 
-function EmployeeActivityPage({ user }) {
+function EmployeeActivityPage({ user, notificationProps, notificationsOpen, setNotificationsOpen }) {
   const [search, setSearch] = useState('')
-  const [documentFilter, setDocumentFilter] = useState('all')
   const [actionFilter, setActionFilter] = useState('all')
   const [outcomeFilter, setOutcomeFilter] = useState('all')
-  const [selected, setSelected] = useState(activityRecords[0])
-  const [tab, setTab] = useState('Details')
+  const [events, setEvents] = useState([])
+  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('eventId') || '')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [page, setPage] = useState(1)
-  const pageSize = 10
+  const pageSize = 20
 
-  const filtered = allActivityRecords.filter((activity) => (
-    (!search || `${activity.document} ${activity.actor} ${activity.action}`.toLowerCase().includes(search.toLowerCase())) &&
-    (documentFilter === 'all' || activity.document === documentFilter) &&
-    (actionFilter === 'all' || activity.action === actionFilter) &&
-    (outcomeFilter === 'all' || activity.outcome === outcomeFilter)
+  useEffect(() => {
+    const controller = new AbortController()
+    async function loadActivity() {
+      try {
+        const documents = await apiGet('/api/documents/my', { signal: controller.signal })
+        const audit = await fetchOwnedAuditEvents(documents.items, controller.signal)
+        setEvents(audit.events)
+        if (audit.failed > 0 && audit.failed === documents.items.length) {
+          setError('Audit records could not be loaded for your documents.')
+        } else if (audit.partial) {
+          setError('Some older document activity could not be retrieved. Only audit records the current account is authorized to view are included.')
+        }
+      } catch (requestError) {
+        if (requestError.name !== 'AbortError') setError(requestError.message)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    loadActivity()
+    return () => controller.abort()
+  }, [])
+
+  const selected = events.find((event) => event.id === selectedId) || null
+  const filtered = events.filter((event) => (
+    (!search || `${event.document.title} ${event.actor_name ?? ''} ${activityLabel(event.action_type)}`.toLowerCase().includes(search.toLowerCase())) &&
+    (actionFilter === 'all' || event.action_type === actionFilter) &&
+    (outcomeFilter === 'all' || event.result === outcomeFilter)
   ))
   const visible = filtered.slice((page - 1) * pageSize, page * pageSize)
 
@@ -1026,12 +1223,12 @@ function EmployeeActivityPage({ user }) {
   }
 
   function exportActivity() {
-    const rows = [['Timestamp', 'Action', 'Document', 'Actor', 'Outcome'], ...filtered.map((event) => [event.time, event.action, event.document, event.actor, event.outcome])]
+    const rows = [['Timestamp', 'Action', 'Document', 'Actor', 'Outcome'], ...filtered.map((event) => [event.occurred_at, activityLabel(event.action_type), event.document.title, event.actor_name ?? 'Unavailable', event.result])]
     const csv = rows.map((row) => row.map((item) => `"${String(item).replaceAll('"', '""')}"`).join(',')).join('\r\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = 'suredocs-document-activity-mock.csv'
+    link.download = 'suredocs-document-activity.csv'
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -1039,212 +1236,106 @@ function EmployeeActivityPage({ user }) {
   }
 
   return (
+    <>
+    <EmployeeTopBar {...notificationProps} notificationsOpen={notificationsOpen} onSearchChange={(event) => { setSearch(event.target.value); setPage(1) }} search={search} setNotificationsOpen={setNotificationsOpen} user={user} />
     <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-4 sm:px-5">
-      <EmployeePageHeader action={<button className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-[8px] font-semibold text-blue-700" onClick={exportActivity} type="button"><EmployeeIcon className="h-3 w-3" name="download" />Export Activity</button>} description="Track all activity related to your documents. View uploads, access, sharing, permission changes and more." icon="activity" title="Document Activity" />
-      <section aria-label="Document activity summary" className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
-        {[
-          { value: '48', title: 'Total Events', detail: 'Last 30 days', icon: 'folder', color: 'blue' },
-          { value: '24', title: 'Document Views', detail: 'Your documents', icon: 'eye', color: 'green' },
-          { value: '8', title: 'Downloads', detail: 'Your documents', icon: 'download', color: 'violet' },
-          { value: '12', title: 'Sharing Actions', detail: 'Grants, updates, revokes', icon: 'share', color: 'amber' },
-          { value: '4', title: 'Denied Attempts', detail: 'Blocked access', icon: 'denied', color: 'rose' },
-        ].map((metric) => <EmployeeMetric {...metric} key={metric.title} />)}
-      </section>
+      <EmployeePageHeader action={<button className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-[10px] font-semibold text-indigo-700" disabled={!filtered.length} onClick={exportActivity} type="button"><EmployeeIcon className="h-3 w-3" name="download" />Export Activity</button>} description="Audit records for documents you own. Records are limited to events your account is authorized to review." icon="activity" title="Document Activity" />
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-        <EmployeeSearch label="Search document activity" onChange={(value) => { setSearch(value); setPage(1) }} placeholder="Search by document name, user, action..." value={search} />
-        <EmployeeFilter label="Activity document" onChange={(value) => updateFilter(setDocumentFilter, value)} options={[{ value: 'all', label: 'All Documents' }, ...[...new Set(allActivityRecords.map((event) => event.document))].map((value) => ({ value, label: value }))]} value={documentFilter} />
-        <EmployeeFilter label="Activity action" onChange={(value) => updateFilter(setActionFilter, value)} options={[{ value: 'all', label: 'All Actions' }, ...[...new Set(allActivityRecords.map((event) => event.action))].map((value) => ({ value, label: value }))]} value={actionFilter} />
-        <EmployeeFilter label="Activity outcome" onChange={(value) => updateFilter(setOutcomeFilter, value)} options={[{ value: 'all', label: 'All Outcomes' }, ...['Success', 'Pending', 'Denied'].map((value) => ({ value, label: value }))]} value={outcomeFilter} />
-        <label className="relative min-w-[170px]"><span className="sr-only">Activity date range</span><EmployeeIcon className="absolute left-2 top-2 h-3 w-3 text-slate-500" name="calendar" /><input aria-label="Activity date range" className="h-8 w-full rounded-md border border-slate-200 pl-6 pr-1 text-[8px] text-slate-600" defaultValue="01 May 2025 - 31 May 2025" /></label>
+        <EmployeeSearch label="Search document activity" onChange={(value) => { setSearch(value); setPage(1) }} placeholder="Search document, actor, action..." value={search} />
+        <EmployeeFilter label="Activity action" onChange={(value) => updateFilter(setActionFilter, value)} options={[{ value: 'all', label: 'All Actions' }, ...[...new Set(events.map((event) => event.action_type))].map((value) => ({ value, label: activityLabel(value) }))]} value={actionFilter} />
+        <EmployeeFilter label="Activity outcome" onChange={(value) => updateFilter(setOutcomeFilter, value)} options={[{ value: 'all', label: 'All Outcomes' }, ...[...new Set(events.map((event) => event.result))].map((value) => ({ value, label: value }))]} value={outcomeFilter} />
       </div>
+      {error && <p className="rounded-md bg-amber-50 px-3 py-2 text-[10px] text-amber-900" role="status">{error}</p>}
       <div className="grid grid-cols-1 items-start gap-2 lg:grid-cols-[minmax(0,1fr)_280px]">
         <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[650px] text-left">
-              <thead className="bg-slate-50 text-[8px] font-semibold text-slate-500"><tr><th className="px-2 py-2">Timestamp ↓</th><th className="px-2 py-2">Action</th><th className="px-2 py-2">Document</th><th className="px-2 py-2">Actor</th><th className="px-2 py-2">Outcome</th><th className="px-2 py-2">Details</th></tr></thead>
+              <thead className="bg-slate-50 text-[10px] font-semibold text-slate-500"><tr><th className="px-2 py-2">Timestamp</th><th className="px-2 py-2">Action</th><th className="px-2 py-2">Document</th><th className="px-2 py-2">Actor</th><th className="px-2 py-2">Outcome</th><th className="px-2 py-2">Details</th></tr></thead>
               <tbody>
-                {visible.map((event) => <tr aria-selected={selected?.time === event.time} className={`cursor-pointer border-t border-slate-100 hover:bg-blue-50/50 ${selected?.time === event.time ? 'bg-blue-50/40' : ''}`} key={event.time} onClick={() => { setSelected(event); setTab('Details') }}>
-                  <td className="whitespace-nowrap px-2 py-2 text-[7px] text-slate-600">{event.time}</td>
-                  <td className="px-2 py-2"><span className="flex min-w-[100px] items-center gap-1.5"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-50 text-blue-700"><EmployeeIcon className="h-3 w-3" name={event.icon} /></span><span className="text-[8px] font-semibold text-slate-700">{event.action}</span></span></td>
-                  <td className="px-2 py-2"><span className="block text-[8px] text-slate-700">{event.document}</span><span className="block text-[7px] text-slate-500">{event.type}</span></td>
-                  <td className="px-2 py-2"><span className="text-[8px] text-slate-700">{event.actor}</span><span className="block text-[7px] text-slate-500">({event.department})</span></td>
-                  <td className="px-2 py-2"><EmployeeBadge tone={event.outcome === 'Success' ? 'green' : event.outcome === 'Denied' ? 'red' : 'amber'}>{event.outcome}</EmployeeBadge></td>
-                  <td className="px-2 py-2"><button aria-label={`View activity details: ${event.action}`} className="rounded p-1 text-slate-500 hover:bg-slate-100" onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelected(event) }} type="button"><EmployeeIcon className="h-3.5 w-3.5" name="more" /></button></td>
+                {visible.map((event) => <tr aria-selected={selectedId === event.id} className={`cursor-pointer border-t border-slate-100 hover:bg-indigo-50/50 ${selectedId === event.id ? 'bg-indigo-50/50' : ''}`} key={event.id} onClick={() => setSelectedId(event.id)}>
+                  <td className="whitespace-nowrap px-2 py-2 text-[10px] text-slate-600">{new Date(event.occurred_at).toLocaleString()}</td>
+                  <td className="px-2 py-2"><span className="flex min-w-[130px] items-center gap-1.5"><span className={`flex h-6 w-6 items-center justify-center rounded-full ${activityTone(event.action_type)} bg-opacity-20`}><EmployeeIcon className="h-3.5 w-3.5" name={activityIcon(event.action_type)} /></span><span className="text-[10px] font-semibold text-slate-700">{activityLabel(event.action_type)}</span></span></td>
+                  <td className="px-2 py-2 text-[10px] text-slate-700">{event.document.title}</td>
+                  <td className="px-2 py-2 text-[10px] text-slate-700">{event.actor_name || 'Unavailable'}</td>
+                  <td className="px-2 py-2"><EmployeeBadge tone={event.result === 'SUCCESS' ? 'green' : 'red'}>{event.result}</EmployeeBadge></td>
+                  <td className="px-2 py-2"><button aria-label={`View activity details: ${activityLabel(event.action_type)}`} className="rounded p-1 text-slate-500 hover:bg-slate-100" onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedId(event.id) }} type="button"><EmployeeIcon className="h-3.5 w-3.5" name="more" /></button></td>
                 </tr>)}
-                {filtered.length === 0 && <tr><td className="py-8 text-center text-[9px] text-slate-500" colSpan={6}>No activity matches these filters.</td></tr>}
+                {!loading && filtered.length === 0 && <tr><td className="py-8 text-center text-[10px] text-slate-500" colSpan={6}>{events.length ? 'No activity matches these filters.' : error ? 'Activity data is unavailable.' : 'No audit events have been recorded for your documents.'}</td></tr>}
+                {loading && <tr><td className="py-8 text-center text-[10px] text-slate-500" colSpan={6}>Loading authorized activity…</td></tr>}
               </tbody>
             </table>
           </div>
           <EmployeePagination count={filtered.length} label="activities" onPageChange={setPage} page={page} pageSize={pageSize} />
         </section>
         {selected && <aside aria-label="Activity details" className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <header className="flex items-center justify-between border-b border-slate-100 p-2.5"><h2 className="text-[9px] font-semibold text-slate-800">Activity Details</h2><button aria-label="Close activity details" className="text-slate-400" onClick={() => setSelected(null)} type="button"><EmployeeIcon className="h-3.5 w-3.5" name="close" /></button></header>
-          <div className="p-2.5">
-            <div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-700"><EmployeeIcon className="h-4 w-4" name={selected.icon} /></span><span className="min-w-0 flex-1"><span className="block text-[8px] font-semibold text-slate-800">{selected.action}</span><span className="block text-[7px] text-slate-500">{selected.time}</span></span><EmployeeBadge tone={selected.outcome === 'Success' ? 'green' : selected.outcome === 'Denied' ? 'red' : 'amber'}>{selected.outcome}</EmployeeBadge></div>
-            <div className="mt-2 flex border-b border-slate-200">{['Details', 'User Info', 'Document Info', 'Security'].map((item) => <button aria-selected={tab === item} className={`flex-1 border-b-2 px-1 py-2 text-[7px] ${tab === item ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500'}`} key={item} onClick={() => setTab(item)} role="tab" type="button">{item}</button>)}</div>
-            <dl className="mt-2 space-y-2 text-[7px]">
-              {(tab === 'Details'
-                ? [['Action', selected.action], ['Outcome', selected.outcome], ['Timestamp', selected.time], ['Document', selected.document], ['File Type', selected.type.split(' ')[0]], ['File Size', selected.type.match(/\((.+)\)/)?.[1] ?? '—'], ['Actor', selected.actor], ['Role', `Employee (${selected.department})`], ['IP Address', selected.ip], ['Device', 'Windows Chrome'], ['Location', 'Hyderabad, India'], ['Request ID', `req_01HZY8K3D7F9A2`], ['Additional Info', 'Viewed in browser (no download)']]
-                : tab === 'User Info'
-                  ? [['Name', selected.actor], ['Department', selected.department], ['Role', 'Employee'], ['IP Address', selected.ip], ['Location', 'Hyderabad, India']]
-                  : tab === 'Document Info'
-                    ? [['Document', selected.document], ['File Type', selected.type], ['Owner', selected.actor === 'You' ? (user?.full_name ? `You (${user.full_name})` : 'You') : 'Document owner'], ['Access', 'Authorized']]
-                    : [['Security Status', selected.outcome], ['Device', 'Windows Chrome'], ['IP Address', selected.ip], ['Request ID', 'req_01HZY8K3D7F9A2']]
-              ).map(([label, value]) => <div className="grid grid-cols-[65px_1fr] gap-1" key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words text-slate-700">{value}</dd></div>)}
-            </dl>
+          <header className="flex items-center justify-between border-b border-slate-100 p-3"><h2 className="text-[12px] font-semibold text-slate-800">Activity Details</h2><button aria-label="Close activity details" className="text-slate-400" onClick={() => setSelectedId('')} type="button"><EmployeeIcon className="h-4 w-4" name="close" /></button></header>
+          <div className="p-3">
+            <div className="flex items-center gap-2"><span className={`flex h-8 w-8 items-center justify-center rounded-full ${activityTone(selected.action_type)} bg-opacity-20`}><EmployeeIcon className="h-4 w-4" name={activityIcon(selected.action_type)} /></span><span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold text-slate-800">{activityLabel(selected.action_type)}</span><span className="block text-[10px] text-slate-500">{new Date(selected.occurred_at).toLocaleString()}</span></span><EmployeeBadge tone={selected.result === 'SUCCESS' ? 'green' : 'red'}>{selected.result}</EmployeeBadge></div>
+            <dl className="mt-4 space-y-3 text-[10px]">{[
+              ['Event ID', selected.id],
+              ['Action', activityLabel(selected.action_type)],
+              ['Outcome', selected.result],
+              ['Timestamp', new Date(selected.occurred_at).toLocaleString()],
+              ['Document', selected.document.title],
+              ['Actor', selected.actor_name || 'Unavailable'],
+              ['IP address', selected.ip_address || 'Unavailable'],
+              ['Request ID', selected.request_id || 'Unavailable'],
+            ].map(([label, value]) => <div className="grid grid-cols-[74px_1fr] gap-2" key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words text-slate-700">{value}</dd></div>)}</dl>
           </div>
         </aside>}
       </div>
-      <p className="text-[7px] text-slate-400">Activity entries are illustrative mock data. Exported activity is a mock CSV preview.</p>
     </main>
+    </>
   )
 }
 
-function EmployeeRequestsPage({ user }) {
-  const [requests, setRequests] = useState(requestExamples)
-  const [tab, setTab] = useState('approve')
-  const [selectedId, setSelectedId] = useState(requestExamples[0].id)
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [documentFilter, setDocumentFilter] = useState('all')
-  const [permissionFilter, setPermissionFilter] = useState('all')
-  const [dateRange, setDateRange] = useState('all')
-  const [notice, setNotice] = useState('')
-  const [page, setPage] = useState(1)
-
-  const selectedRequest = requests.find((request) => request.id === selectedId)
-  const myRequests = requests.filter((request) => request.isMine)
-  const baseRequests = tab === 'approve' ? requests.filter((request) => !request.isMine) : myRequests
-  const filtered = baseRequests.filter((request) => (
-    (!search || `${request.requester} ${request.document} ${request.reason} ${request.id}`.toLowerCase().includes(search.toLowerCase())) &&
-    (typeFilter === 'all' || request.status === typeFilter) &&
-    (documentFilter === 'all' || request.document === documentFilter) &&
-    (permissionFilter === 'all' || request.permission === permissionFilter) &&
-    (dateRange === 'all' ||
-      (new Date('2025-05-27T23:59:59') - new Date(request.requested)) / 86400000 <= Number(dateRange))
-  ))
-  const pending = requests.filter((request) => request.status === 'Pending' && !request.isMine)
-  const recent = requests.filter((request) => request.status !== 'Pending' && !request.isMine)
-  const pageSize = 5
-  const visible = filtered.slice((page - 1) * pageSize, page * pageSize)
-
-  function updateRequest(id, status) {
-    setRequests((current) => current.map((request) => request.id === id ? { ...request, status } : request))
-    setNotice(`Request ${id} marked ${status.toLowerCase()}. This is a mock preview.`)
-  }
-
-  function resetFilters() {
-    setSearch('')
-    setTypeFilter('all')
-    setDocumentFilter('all')
-    setPermissionFilter('all')
-    setDateRange('all')
-    setPage(1)
-  }
-
+function EmployeeRequestsPage({ user, notificationsOpen, onSearchChange, search, setNotificationsOpen, notificationProps }) {
   return (
-    <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-4 sm:px-5">
-      <EmployeePageHeader description="View and manage access requests for your documents or requests you have submitted." icon="users" title="Access Requests" />
-      <div className="flex gap-4 border-b border-slate-200">
-        {[{ id: 'approve', label: 'Requests to Approve', count: pending.length }, { id: 'mine', label: 'My Requests', count: myRequests.length }].map((item) => <button aria-selected={tab === item.id} className={`flex items-center gap-2 border-b-2 px-3 py-2 text-[9px] font-semibold ${tab === item.id ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500'}`} key={item.id} onClick={() => { setTab(item.id); setPage(1); setSelectedId(item.id === 'mine' ? myRequests[0]?.id ?? '' : pending[0]?.id ?? '') }} role="tab" type="button">{item.label}<span className={`rounded-full px-1.5 py-0.5 text-[7px] ${item.id === 'approve' ? 'bg-rose-500 text-white' : 'bg-blue-100 text-blue-700'}`}>{item.count}</span></button>)}
-      </div>
-      <section aria-label="Access request summary" className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {[
-          { value: String(pending.length), title: 'Pending Approval', detail: 'Require your action', icon: 'inbox', color: 'blue' },
-          { value: String(requests.filter((request) => request.status === 'Approved').length), title: 'Approved', detail: 'Last 30 days', icon: 'check', color: 'green' },
-          { value: String(requests.filter((request) => request.status === 'Rejected').length), title: 'Rejected', detail: 'Last 30 days', icon: 'denied', color: 'rose' },
-          { value: String(myRequests.filter((request) => request.status === 'Pending').length), title: 'My Pending Requests', detail: 'Waiting for response', icon: 'clock', color: 'amber' },
-        ].map((metric) => <EmployeeMetric {...metric} key={metric.title} />)}
-      </section>
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-        <EmployeeSearch label="Search access requests" onChange={(value) => { setSearch(value); setPage(1) }} placeholder="Search by document name, requester or reason..." value={search} />
-        <EmployeeFilter label="Request type" onChange={(value) => { setTypeFilter(value); setPage(1) }} options={[{ value: 'all', label: 'Request Type' }, ...['Pending', 'Approved', 'Rejected'].map((value) => ({ value, label: value }))]} value={typeFilter} />
-        <EmployeeFilter label="Request document" onChange={(value) => { setDocumentFilter(value); setPage(1) }} options={[{ value: 'all', label: 'Document' }, ...[...new Set(requests.map((request) => request.document))].map((value) => ({ value, label: value }))]} value={documentFilter} />
-        <EmployeeFilter label="Requested permission" onChange={(value) => { setPermissionFilter(value); setPage(1) }} options={[{ value: 'all', label: 'Requested Permission' }, ...['View', 'Download'].map((value) => ({ value, label: value }))]} value={permissionFilter} />
-        <EmployeeFilter label="Request date range" onChange={(value) => { setDateRange(value); setPage(1) }} options={[{ value: 'all', label: 'Date Range' }, { value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }]} value={dateRange} />
-        <button className="ml-auto h-8 rounded-md border border-slate-200 px-3 text-[8px] font-semibold text-blue-600" onClick={resetFilters} type="button">Reset</button>
-      </div>
-      {notice && <p aria-live="polite" className="rounded-md bg-blue-50 px-3 py-2 text-[8px] text-blue-800">{notice}</p>}
+    <>
+      <EmployeeTopBar
+        {...notificationProps}
+        notificationsOpen={notificationsOpen}
+        onSearchChange={onSearchChange}
+        search={search}
+        setNotificationsOpen={setNotificationsOpen}
+        user={user}
+      />
+      <EmployeeAccessRequestsPage />
+    </>
+  )
+}
 
-      <div className="grid grid-cols-1 items-start gap-2 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="space-y-2">
-          {tab === 'approve' && (
-            <RequestTable
-              empty="No pending requests."
-              onSelect={setSelectedId}
-              onUpdate={updateRequest}
-              requests={visible.filter((request) => request.status === 'Pending')}
-              selectedId={selectedId}
-              title={`Pending Requests (${pending.length})`}
-            />
-          )}
-          <RequestTable
-            empty={tab === 'mine' ? 'You have no submitted requests.' : 'No recent requests.'}
-            onSelect={setSelectedId}
-            onUpdate={updateRequest}
-            requests={tab === 'mine' ? visible : visible.filter((request) => request.status !== 'Pending')}
-            selectedId={selectedId}
-            title={tab === 'mine' ? 'My Requests' : `Recent Requests (${recent.length})`}
-          />
-          <EmployeePagination count={filtered.length} label="requests" onPageChange={setPage} page={page} pageSize={pageSize} />
-        </div>
-        {selectedRequest && <aside aria-label="Request details" className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <header className="flex items-center justify-between border-b border-slate-100 p-2.5"><h2 className="text-[9px] font-semibold text-slate-800">Request Details</h2><div className="flex items-center gap-2"><EmployeeBadge tone={selectedRequest.status === 'Pending' ? 'amber' : selectedRequest.status === 'Approved' ? 'green' : 'red'}>{selectedRequest.status}</EmployeeBadge><button aria-label="Close request details" className="text-slate-400" onClick={() => setSelectedId('')} type="button"><EmployeeIcon className="h-3.5 w-3.5" name="close" /></button></div></header>
-          <div className="p-2.5">
-            <div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[8px] font-semibold text-indigo-700">{selectedRequest.requester.split(' ').map((word) => word[0]).join('')}</span><span><span className="block text-[8px] font-semibold text-slate-800">{selectedRequest.requester}</span><span className="block text-[7px] text-slate-500">{selectedRequest.department}</span><span className="block text-[7px] text-slate-500">{selectedRequest.requester.toLowerCase().replaceAll(' ', '.')}@company.com</span></span></div>
-            <section className="mt-2 flex items-center justify-between rounded-md border border-slate-100 p-2"><span className="flex items-center gap-2"><EmployeeDocumentIcon document={employeeDocuments.find((doc) => doc.name === selectedRequest.document) ?? sharedDocuments.find((doc) => doc.name === selectedRequest.document) ?? { type: 'PDF', tone: 'bg-rose-600' }} /><span><span className="block text-[8px] font-semibold text-slate-700">{selectedRequest.document}</span><span className="block text-[7px] text-slate-500">{selectedRequest.size}</span></span></span><button className="rounded border border-slate-200 px-2 py-1 text-[7px] font-medium text-blue-700" onClick={() => setNotice('Document preview is not connected in this mock interface.')} type="button">Open</button></section>
-            <dl className="mt-2 space-y-1.5 text-[7px]">{[['Requested Permission', selectedRequest.permission], ['Requested On', selectedRequest.requested], ['Reason', selectedRequest.reason]].map(([label, value]) => <div className="grid grid-cols-[78px_1fr] gap-1" key={label}><dt className="text-slate-500">{label}</dt><dd className="text-slate-700">{label === 'Requested Permission' ? <EmployeeBadge tone={value === 'Download' ? 'amber' : 'blue'}>{value}</EmployeeBadge> : value}</dd></div>)}</dl>
-            {tab === 'mine' ? (
-              <section className="mt-3 border-t border-slate-100 pt-2"><h3 className="text-[8px] font-semibold text-slate-700">Request Status</h3><p className="mt-1 text-[7px] leading-3 text-slate-500">{selectedRequest.status === 'Pending' ? 'Your request is waiting for the document owner to respond.' : `Your request was ${selectedRequest.status.toLowerCase()}.`}</p><button className="mt-2 rounded border border-slate-200 px-2 py-1 text-[7px] text-slate-600" onClick={() => setNotice('Request cancellation is a preview only.')} type="button">Cancel Request</button></section>
-            ) : selectedRequest.status === 'Pending' ? (
-              <>
-                <section className="mt-2 border-t border-slate-100 pt-2"><h3 className="text-[8px] font-semibold text-slate-700">Additional Information</h3><dl className="mt-1 space-y-1 text-[7px]"><div className="grid grid-cols-[70px_1fr]"><dt className="text-slate-500">Department</dt><dd>{selectedRequest.department}</dd></div><div className="grid grid-cols-[70px_1fr]"><dt className="text-slate-500">Role</dt><dd>Employee</dd></div><div className="grid grid-cols-[70px_1fr]"><dt className="text-slate-500">Access Needed Until</dt><dd><input aria-label="Access needed until" className="rounded border border-slate-200 p-1 text-[7px]" defaultValue={selectedRequest.expires} type="date" /></dd></div>{selectedRequest.attachment && <div className="grid grid-cols-[70px_1fr]"><dt className="text-slate-500">Attachments</dt><dd className="text-blue-700">{selectedRequest.attachment}</dd></div>}</dl></section>
-                <section className="mt-3 border-t border-slate-100 pt-2"><h3 className="text-[8px] font-semibold text-slate-700">Your Action</h3><div className="mt-2 flex flex-wrap gap-1"><button className="flex-1 rounded bg-[#087c77] px-2 py-1.5 text-[7px] font-semibold text-white" onClick={() => updateRequest(selectedRequest.id, 'Approved')} type="button">✓ Approve</button><button className="flex-1 rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-[7px] font-semibold text-rose-700" onClick={() => updateRequest(selectedRequest.id, 'Rejected')} type="button">× Reject</button><button className="flex-1 rounded border border-slate-200 px-2 py-1.5 text-[7px] font-semibold text-slate-600" onClick={() => setNotice(`Asked ${selectedRequest.requester} for more information (mock).`)} type="button">Ask for More Info</button></div></section>
-              </>
-            ) : <p className="mt-3 border-t border-slate-100 pt-2 text-[7px] text-slate-500">This request has already been {selectedRequest.status.toLowerCase()}.</p>}
+function EmployeeNotificationsPage({ user, notificationProps, notificationsOpen, setNotificationsOpen }) {
+  return (
+    <>
+      <EmployeeTopBar {...notificationProps} user={user} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} />
+      <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6">
+        <EmployeePageHeader
+          action={<button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-[10px] font-semibold text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400" disabled={notificationProps.unreadCount === 0 || notificationProps.notificationStatus === 'loading'} onClick={notificationProps.onMarkAllRead} type="button">Mark all read</button>}
+          description="Notifications for your SureDocs account."
+          icon="bell"
+          title="Notifications"
+        />
+        <section className="mt-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">{notificationProps.unreadCount} unread</p>
+            {notificationProps.notificationActionError && <p className="text-xs text-rose-700" role="alert">{notificationProps.notificationActionError}</p>}
           </div>
-        </aside>}
-      </div>
-      <p className="text-[7px] text-slate-400">Requests, decisions and notifications use mock data. No real document permissions are changed.</p>
-    </main>
+          <EmployeeNotificationList error={notificationProps.notificationError} items={notificationProps.notifications} onMarkRead={notificationProps.onMarkRead} status={notificationProps.notificationStatus} />
+        </section>
+      </main>
+    </>
   )
 }
 
-function RequestTable({ title, requests, selectedId, onSelect, onUpdate, empty }) {
-  return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-      <header className={`border-b border-slate-100 px-2.5 py-2 ${title.startsWith('Pending') ? 'bg-amber-50/70' : 'bg-white'}`}><h2 className="text-[9px] font-semibold text-slate-800">{title}</h2></header>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[550px] text-left text-[7px]">
-          <thead className="bg-slate-50 text-slate-500"><tr>{(title.startsWith('Pending') ? ['Requester', 'Document', 'Requested Permission', 'Reason', 'Requested On', 'Actions'] : ['Requester', 'Document', 'Requested Permission', 'Status', 'Requested On', 'Responded On', 'Actions']).map((heading) => <th className="px-2 py-2" key={heading}>{heading}</th>)}</tr></thead>
-          <tbody>
-            {requests.map((request) => <tr aria-selected={selectedId === request.id} className={`cursor-pointer border-t border-slate-100 hover:bg-blue-50/50 ${selectedId === request.id ? 'bg-blue-50/60' : ''}`} key={request.id} onClick={() => onSelect(request.id)}>
-              <td className="px-2 py-2"><span className="flex items-center gap-1.5"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 text-[6px] font-semibold text-indigo-700">{request.requester.split(' ').map((word) => word[0]).join('')}</span><span><span className="block whitespace-nowrap text-[8px] font-medium text-slate-700">{request.requester}</span><span className="block text-[7px] text-slate-500">{request.department}</span></span></span></td>
-              <td className="px-2 py-2"><span className="flex items-center gap-1 whitespace-nowrap"><EmployeeDocumentIcon document={employeeDocuments.find((doc) => doc.name === request.document) ?? sharedDocuments.find((doc) => doc.name === request.document) ?? { type: 'PDF', tone: 'bg-rose-600' }} /><span><span className="block text-[7px] text-slate-700">{request.document}</span><span className="block text-[6px] text-slate-500">{request.size}</span></span></span></td>
-              <td className="px-2 py-2"><EmployeeBadge tone={request.permission === 'Download' ? 'amber' : 'blue'}>{request.permission}</EmployeeBadge></td>
-              {title.startsWith('Pending')
-                ? <td className="max-w-[95px] px-2 py-2 text-[7px] text-slate-600">{request.reason}</td>
-                : <td className="px-2 py-2"><EmployeeBadge tone={request.status === 'Approved' ? 'green' : request.status === 'Rejected' ? 'red' : 'amber'}>{request.status}</EmployeeBadge></td>}
-              <td className="whitespace-nowrap px-2 py-2 text-[7px] text-slate-600">{request.requested}</td>
-              {!title.startsWith('Pending') && <td className="whitespace-nowrap px-2 py-2 text-[7px] text-slate-600">{request.status === 'Pending' ? '—' : '25 May 2025 03:02 PM'}</td>}
-              <td className="px-2 py-2">{request.status === 'Pending' ? <span className="flex gap-1"><button className="rounded bg-[#087c77] px-2 py-1 text-[7px] font-semibold text-white" onClick={(event) => { event.stopPropagation(); onUpdate(request.id, 'Approved') }} type="button">Approve</button><button className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[7px] font-semibold text-rose-700" onClick={(event) => { event.stopPropagation(); onUpdate(request.id, 'Rejected') }} type="button">Reject</button></span> : <button className="rounded border border-blue-200 px-2 py-1 text-[7px] font-semibold text-blue-700" onClick={(event) => { event.stopPropagation(); onSelect(request.id) }} type="button">View</button>}</td>
-            </tr>)}
-            {requests.length === 0 && <tr><td className="py-6 text-center text-[8px] text-slate-500" colSpan={7}>{empty}</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function EmployeeSectionPlaceholder({ user, pathname }) {
+function EmployeeSectionPlaceholder({ user, pathname, notificationProps, notificationsOpen, setNotificationsOpen }) {
   const section = [...employeeNavigation, ...employeeBottomNavigation]
     .find((item) => item.href === pathname)
   const title = section?.label ?? 'Employee workspace'
 
   return (
     <>
-      <EmployeeTopBar user={user} notificationsOpen={false} onSearchChange={() => {}} search="" setNotificationsOpen={() => {}} unreadCount={5} />
+      <EmployeeTopBar {...notificationProps} user={user} notificationsOpen={notificationsOpen} onSearchChange={() => {}} search="" setNotificationsOpen={setNotificationsOpen} />
       <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6">
         <h1 className="text-xl font-semibold text-slate-900">{title}</h1>
         <p className="mt-1 text-xs text-slate-500">Your secure SureDocs employee workspace.</p>
@@ -1258,96 +1349,204 @@ function EmployeeSectionPlaceholder({ user, pathname }) {
   )
 }
 
-function EmployeeProfilePage({ user }) {
-  const [profile, setProfile] = useState(null)
-  const [error, setError] = useState('')
+export default function EmployeeDashboard({ user }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [workspaceSearch, setWorkspaceSearch] = useState('')
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname.replace(/\/$/, '') || '/employee')
+  const [notificationRefresh, setNotificationRefresh] = useState(0)
+  const [notificationState, setNotificationState] = useState({ items: [], unreadCount: 0, status: 'loading', error: '', actionError: '' })
+  const [pendingRequestCounts, setPendingRequestCounts] = useState({ owned: null, mine: null, loading: true, error: false })
 
   useEffect(() => {
     const controller = new AbortController()
-    apiGet('/api/users/me/profile', { signal: controller.signal })
-      .then(setProfile)
-      .catch((requestError) => {
-        if (requestError.name !== 'AbortError') setError(requestError.message)
+    let active = true
+    apiGet('/api/users/me/notifications?page=1&page_size=8', { signal: controller.signal })
+      .then((response) => {
+        if (!active) return
+        setNotificationState({
+          items: Array.isArray(response.items) ? response.items : [],
+          unreadCount: Number(response.unread_count) || 0,
+          status: 'ready',
+          error: '',
+          actionError: '',
+        })
       })
-    return () => controller.abort()
+      .catch((error) => {
+        if (active && error.name !== 'AbortError') {
+          setNotificationState((current) => ({ ...current, status: 'error', error: error.message || 'Notifications could not be loaded.' }))
+        }
+      })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [notificationRefresh, user?.id])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    Promise.allSettled([
+      apiGet('/api/access-requests?scope=owned&status=PENDING&page=1&page_size=1', { signal: controller.signal }),
+      apiGet('/api/access-requests?scope=mine&status=PENDING&page=1&page_size=1', { signal: controller.signal }),
+    ]).then(([owned, mine]) => {
+      if (!active) return
+      setPendingRequestCounts({
+        owned: owned.status === 'fulfilled' ? Number(owned.value.total) || 0 : null,
+        mine: mine.status === 'fulfilled' ? Number(mine.value.total) || 0 : null,
+        loading: false,
+        error: owned.status === 'rejected' || mine.status === 'rejected',
+      })
+    })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [user?.id])
+
+  function refreshNotifications() {
+    setNotificationRefresh((current) => current + 1)
+  }
+
+  async function markNotificationRead(notificationId) {
+    try {
+      const updated = await apiPatch(`/api/users/me/notifications/${encodeURIComponent(notificationId)}/read`, {})
+      setNotificationState((current) => {
+        const existing = current.items.find((item) => item.id === notificationId)
+        if (!existing) return { ...current, actionError: '' }
+        const wasUnread = !existing.read_at
+        return {
+          ...current,
+          items: current.items.map((item) => item.id === notificationId ? { ...item, read_at: updated.read_at } : item),
+          unreadCount: Math.max(0, current.unreadCount - (wasUnread ? 1 : 0)),
+          actionError: '',
+        }
+      })
+    } catch (error) {
+      setNotificationState((current) => ({ ...current, actionError: error.message || 'This notification could not be marked read.' }))
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    try {
+      await apiPost('/api/users/me/notifications/read-all', {})
+      const readAt = new Date().toISOString()
+      setNotificationState((current) => ({
+        ...current,
+        items: current.items.map((item) => item.read_at ? item : { ...item, read_at: readAt }),
+        unreadCount: 0,
+        actionError: '',
+      }))
+    } catch (error) {
+      setNotificationState((current) => ({ ...current, actionError: error.message || 'Notifications could not be marked read.' }))
+    }
+  }
+
+  const notificationProps = {
+    notifications: notificationState.items,
+    unreadCount: notificationState.unreadCount,
+    notificationStatus: notificationState.status,
+    notificationError: notificationState.error,
+    notificationActionError: notificationState.actionError,
+    onMarkRead: markNotificationRead,
+    onMarkAllRead: markAllNotificationsRead,
+    onRefreshNotifications: refreshNotifications,
+  }
+
+  useEffect(() => {
+    function handleLocationChange() {
+      setCurrentPath(window.location.pathname.replace(/\/$/, '') || '/employee')
+    }
+    window.addEventListener('popstate', handleLocationChange)
+    return () => window.removeEventListener('popstate', handleLocationChange)
+  }, [])
+
+  const initialDocumentId = new URLSearchParams(window.location.search).get('documentId')
+  const isDashboard = currentPath === '/employee' || currentPath === '/employee/dashboard'
+  const isDocumentsRoute = ['/employee/documents', '/employee/shared', '/employee/upload'].includes(currentPath)
+  const isAccessRequestsRoute = currentPath === '/employee/requests'
+
+  let profileSection = null
+  if (currentPath === '/employee/profile' || currentPath === '/employee/profile/account') {
+    profileSection = 'account'
+  } else if (currentPath === '/employee/profile/security') {
+    profileSection = 'security'
+  } else if (currentPath === '/employee/profile/notifications') {
+    profileSection = 'notifications'
+  } else if (currentPath === '/employee/profile/preferences') {
+    profileSection = 'preferences'
+  } else if (currentPath === '/employee/profile/storage' || currentPath === '/employee/storage') {
+    profileSection = 'storage'
+  } else if (currentPath === '/employee/profile/connected' || currentPath === '/employee/connected' || currentPath === '/employee/profile/connected-accounts') {
+    profileSection = 'connected'
+  }
+  const isProfileRoute = Boolean(profileSection)
+
+  const workspace = isProfileRoute ? (
+    <ProfileSettingsWorkspace initialTab={profileSection} user={user} />
+  ) : {
+    '/employee/documents': <DocumentsWorkspace initialDocumentId={initialDocumentId} mode="owned" onSearchChange={setWorkspaceSearch} search={workspaceSearch} user={user} />,
+    '/employee/shared': <DocumentsWorkspace initialDocumentId={initialDocumentId} mode="shared" onSearchChange={setWorkspaceSearch} search={workspaceSearch} user={user} />,
+    '/employee/upload': <DocumentsWorkspace mode="owned" startInUpload user={user} />,
+    '/employee/activity': <EmployeeActivityPage notificationProps={notificationProps} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} user={user} />,
+    '/employee/requests': <EmployeeRequestsPage
+      notificationProps={notificationProps}
+      notificationsOpen={notificationsOpen}
+      onSearchChange={(event) => setWorkspaceSearch(event.target.value)}
+      search={workspaceSearch}
+      setNotificationsOpen={setNotificationsOpen}
+      user={user}
+    />,
+    '/employee/notifications': <EmployeeNotificationsPage notificationProps={notificationProps} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} user={user} />,
+  }[currentPath]
+
+  useEffect(() => {
+    const titleMap = {
+      account: 'Account Information | SureDocs',
+      security: 'Security Settings | SureDocs',
+      notifications: 'Notification Preferences | SureDocs',
+      preferences: 'Preferences | SureDocs',
+      storage: 'Storage Usage | SureDocs',
+      connected: 'Connected Accounts | SureDocs',
+    }
+    if (profileSection) {
+      document.title = titleMap[profileSection] || 'Profile & Settings | SureDocs'
+    } else {
+      document.title = `${isDashboard ? 'Employee dashboard' : employeeNavigation.concat(employeeBottomNavigation).find((item) => item.href === currentPath)?.label ?? 'Employee workspace'} | SureDocs`
+    }
+  }, [currentPath, isDashboard, profileSection])
+
+  useEffect(() => {
+    const toggle = () => setSidebarOpen((open) => !open)
+    const close = () => setSidebarOpen(false)
+    window.addEventListener('suredocs:toggle-employee-nav', toggle)
+    window.addEventListener('suredocs:close-employee-nav', close)
+    return () => {
+      window.removeEventListener('suredocs:toggle-employee-nav', toggle)
+      window.removeEventListener('suredocs:close-employee-nav', close)
+    }
   }, [])
 
   return (
-    <>
-      <EmployeeTopBar
-        user={user}
-        notificationsOpen={false}
-        onSearchChange={() => {}}
-        search=""
-        setNotificationsOpen={() => {}}
-        unreadCount={0}
-      />
-      <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6">
-        <h1 className="text-xl font-semibold text-slate-900">Profile &amp; Settings</h1>
-        <p className="mt-1 text-xs text-slate-500">Your account details from SureDocs.</p>
-        {error && <p className="mt-5 rounded-lg bg-rose-50 p-3 text-sm text-rose-800" role="alert">{error}</p>}
-        {!profile && !error && <p className="mt-5 text-sm text-slate-500" role="status">Loading your profile…</p>}
-        {profile && (
-          <section className="mt-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
-            <div className="flex items-center gap-4 border-b border-slate-100 pb-5">
-              <UserAvatar className="h-14 w-14 text-lg" email={profile.email} fullName={profile.full_name} />
-              <div>
-                <h2 className="font-semibold text-slate-900">{profile.full_name}</h2>
-                <p className="text-sm text-slate-500">{profile.email}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {profile.role} · {profile.account_status}
-                </p>
-              </div>
-            </div>
-            <dl className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
-              {[
-                ['Employee code', profile.employee_code],
-                ['Department', profile.department],
-                ['Job title', profile.job_title],
-                ['Email verified', profile.email_verified_at],
-                ['Account created', profile.created_at],
-                ['Last login', profile.last_login_at],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <dt className="text-xs text-slate-500">{label}</dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-800">
-                    {value ? (label.includes('verified') || label.includes('created') || label.includes('login')
-                      ? new Date(value).toLocaleString()
-                      : value) : '—'}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        )}
-      </main>
-    </>
-  )
-}
-
-export default function EmployeeDashboard({ user }) {
-  const pathname = window.location.pathname.replace(/\/$/, '') || '/employee'
-  const isDashboard = pathname === '/employee' || pathname === '/employee/dashboard'
-  const workspace = {
-    '/employee/documents': <DocumentsWorkspace mode="owned" user={user} />,
-    '/employee/shared': <DocumentsWorkspace mode="shared" user={user} />,
-    '/employee/upload': <DocumentsWorkspace mode="owned" startInUpload user={user} />,
-    '/employee/activity': <EmployeeActivityPage user={user} />,
-    '/employee/requests': <EmployeeRequestsPage user={user} />,
-    '/employee/profile': <EmployeeProfilePage user={user} />,
-  }[pathname]
-
-  useEffect(() => {
-    document.title = `${isDashboard ? 'Employee dashboard' : employeeNavigation.concat(employeeBottomNavigation).find((item) => item.href === pathname)?.label ?? 'Employee workspace'} | SureDocs`
-  }, [isDashboard, pathname])
-
-  return (
-    <div className="min-h-screen bg-[#f4f7fa] text-slate-900 lg:pl-[180px]">
-      <EmployeeSidebar pathname={pathname} />
-      <div className="min-h-screen">
+    <div className={`employee-shell${isDocumentsRoute ? ' employee-shell--documents' : ''}${currentPath === '/employee/upload' ? ' employee-shell--upload' : ''}${isAccessRequestsRoute ? ' employee-shell--access-requests' : ''}${isProfileRoute ? ' employee-shell--profile' : ''} ${sidebarOpen ? 'employee-shell--nav-open' : ''}`}>
+      <EmployeeSidebar pathname={currentPath} onClose={() => setSidebarOpen(false)} open={sidebarOpen} pendingRequestCount={pendingRequestCounts.owned} />
+      {sidebarOpen && <button aria-label="Close navigation" className="employee-sidebar-backdrop" onClick={() => setSidebarOpen(false)} type="button" />}
+      <div className="employee-shell-content">
         {isDashboard
-          ? <EmployeeDashboardContent user={user} />
-          : workspace ?? <EmployeeSectionPlaceholder user={user} pathname={pathname} />}
+          ? <EmployeeDashboardContent notificationProps={notificationProps} notificationsOpen={notificationsOpen} pendingRequestCounts={pendingRequestCounts} setNotificationsOpen={setNotificationsOpen} user={user} />
+          : (isDocumentsRoute || isProfileRoute)
+            ? <>
+              <EmployeeTopBar
+                {...notificationProps}
+                notificationsOpen={notificationsOpen}
+                onSearchChange={(event) => setWorkspaceSearch(event.target.value)}
+                search={workspaceSearch}
+                setNotificationsOpen={setNotificationsOpen}
+                user={user}
+              />
+              {workspace ?? <EmployeeSectionPlaceholder notificationProps={notificationProps} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} user={user} pathname={currentPath} />}
+            </>
+            : workspace ?? <EmployeeSectionPlaceholder notificationProps={notificationProps} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} user={user} pathname={currentPath} />}
       </div>
     </div>
   )

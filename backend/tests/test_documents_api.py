@@ -11,10 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from app.models.documents import Document, DocumentAuditLog, DocumentVersion
+from app.models.documents import Document, DocumentAuditLog, DocumentPermission, DocumentVersion
 from app.models.user import User
-from app.routers.documents import _response_stream, _validate_content
+from app.routers.documents import _file_response, _response_stream, _validate_content
 from app.schemas.documents import PermissionGrantRequest
+from app.services.antivirus import MalwareDetectedError, ScannerUnavailableError
 from app.services.s3_storage import StorageUnavailableError
 
 _PDF = b"%PDF-1.7\nSureDocs document test\n"
@@ -42,12 +43,59 @@ def test_text_formats_are_utf8_checked_and_malformed_json_remains_plain_text() -
         "text/plain",
         "log",
     )
-    with pytest.raises(HTTPException) as unsupported:
-        _validate_content("active.html", "text/html", b"<script>alert(1)</script>")
-    assert unsupported.value.status_code == 415
+    assert _validate_content("active.html", "text/html", b"<script>alert(1)</script>") == (
+        "text/html",
+        "html",
+    )
     with pytest.raises(HTTPException) as invalid_encoding:
         _validate_content("notes.txt", "text/plain", b"\xff\xfe")
     assert invalid_encoding.value.status_code == 415
+
+
+def test_additional_document_formats_are_validated_and_active_content_is_sandboxed() -> None:
+    import zipfile
+    from types import SimpleNamespace
+    from io import BytesIO
+
+    assert _validate_content("events.ics", "text/calendar", b"BEGIN:VCALENDAR\nEND:VCALENDAR") == (
+        "text/calendar",
+        "ics",
+    )
+    assert _validate_content("events.jsonl", "application/json", b'{"ok":true}\n') == (
+        "application/x-ndjson",
+        "jsonl",
+    )
+    assert _validate_content("diagram.svg", "image/svg+xml", b"<svg xmlns='http://www.w3.org/2000/svg'/>") == (
+        "image/svg+xml",
+        "svg",
+    )
+    with pytest.raises(HTTPException):
+        _validate_content("unsafe.xml", "application/xml", b"<!DOCTYPE x [<!ENTITY y 'z'>]><x/>")
+
+    epub = BytesIO()
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            b"application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "META-INF/container.xml",
+            b"<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container'><rootfiles/></container>",
+        )
+    assert _validate_content("guide.epub", "application/epub+zip", epub.getvalue()) == (
+        "application/epub+zip",
+        "epub",
+    )
+
+    response = _file_response(
+        {"Body": BytesIO(b"<script>blocked</script>")},
+        SimpleNamespace(content_type="text/html", original_filename="index.html"),
+        inline=True,
+    )
+    assert "sandbox" in response.headers["content-security-policy"]
+    assert "default-src 'none'" in response.headers["content-security-policy"]
+    assert "connect-src 'none'" in response.headers["content-security-policy"]
 
 
 def test_interrupted_s3_stream_reports_failure_and_closes_the_body() -> None:
@@ -129,6 +177,35 @@ def _seed_document(db: Session, owner: User) -> Document:
     return document
 
 
+def test_permission_responses_include_account_status_and_edit_level(
+    client: TestClient,
+    db: Session,
+    active_admin: User,
+    active_employee: User,
+) -> None:
+    document = _seed_document(db, active_employee)
+    _login(client, active_employee.email, "SecureEmp1!")
+
+    grant_response = client.put(
+        f"/api/documents/{document.id}/permissions",
+        json={
+            "user_id": str(active_admin.id),
+            "can_view": True,
+            "can_download": False,
+            "can_edit": True,
+        },
+    )
+
+    assert grant_response.status_code == 200, grant_response.text
+    assert grant_response.json()["user_account_status"] == "ACTIVE"
+    assert grant_response.json()["can_edit"] is True
+
+    listed = client.get(f"/api/documents/{document.id}/permissions")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"][0]["user_account_status"] == "ACTIVE"
+    assert listed.json()["items"][0]["can_edit"] is True
+
+
 @pytest.mark.parametrize(
     ("email", "password", "owner_fixture"),
     [
@@ -159,6 +236,7 @@ def test_active_user_uploads_document_and_persists_s3_metadata(
         return "test-s3-version"
 
     monkeypatch.setattr("app.routers.documents.put_document", fake_put)
+    monkeypatch.setattr("app.routers.documents.scan_document_bytes", lambda content: None)
     _login(client, email, password)
     response = client.post(
         "/api/documents/upload",
@@ -177,15 +255,19 @@ def test_active_user_uploads_document_and_persists_s3_metadata(
     assert payload["owner_name"] == owner.full_name
     assert payload["title"] == "Signed agreement"
     assert payload["original_filename"] == "agreement.pdf"
+    assert payload["current_version_id"] is not None
     assert payload["current_version_number"] == 1
-    assert payload["size_bytes"] == len(_PDF)
+    assert payload["latest_uploaded_version_number"] == 1
+    assert payload["latest_uploaded_version_status"] == "AVAILABLE"
     assert uploaded["bytes"] == _PDF
-    assert uploaded["key"] == (
-        f"documents/{payload['id']}/versions/{payload['current_version_id']}/content"
-    )
-    version = db.get(DocumentVersion, uuid.UUID(payload["current_version_id"]))
-    assert version is not None
+    version = db.execute(
+        select(DocumentVersion).where(DocumentVersion.document_id == uuid.UUID(payload["id"]))
+    ).scalar_one()
+    assert uploaded["key"] == version.storage_key
+    assert version.original_filename == "agreement.pdf"
+    assert version.size_bytes == len(_PDF)
     assert version.status == "AVAILABLE"
+    assert version.scan_completed_at is not None
     assert version.s3_version_id == "test-s3-version"
     assert version.checksum_sha256 == hashlib.sha256(_PDF).hexdigest()
 
@@ -230,6 +312,74 @@ def test_failed_s3_upload_never_marks_document_version_available(
             DocumentAuditLog.action_type == "UPLOAD_REJECTED",
         )
     ).scalar_one_or_none() is not None
+
+
+def test_upload_with_unavailable_scanner_stays_pending_and_returns_accepted(
+    client: TestClient,
+    db: Session,
+    active_employee: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.routers.documents.put_document",
+        lambda key, body, *, content_type, checksum_sha256: "test-s3-version",
+    )
+
+    def scanner_unavailable(content: bytes) -> None:
+        raise ScannerUnavailableError("scanner offline")
+
+    monkeypatch.setattr("app.routers.documents.scan_document_bytes", scanner_unavailable)
+    _login(client, "testemployee@suredocs.example", "SecureEmp1!")
+    response = client.post(
+        "/api/documents/upload",
+        files={"file": ("pending.pdf", _PDF, "application/pdf")},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["latest_uploaded_version_status"] == "PENDING_SCAN"
+    version = db.execute(
+        select(DocumentVersion)
+        .join(Document, Document.id == DocumentVersion.document_id)
+        .where(Document.owner_user_id == active_employee.id)
+        .order_by(DocumentVersion.created_at.desc())
+    ).scalars().first()
+    assert version is not None and version.status == "PENDING_SCAN"
+    assert version.scan_completed_at is None
+
+
+def test_upload_detected_as_malware_is_quarantined_and_not_published(
+    client: TestClient,
+    db: Session,
+    active_employee: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.routers.documents.put_document",
+        lambda key, body, *, content_type, checksum_sha256: "test-s3-version",
+    )
+
+    def scanner_detects_malware(content: bytes) -> None:
+        raise MalwareDetectedError("detected")
+
+    monkeypatch.setattr("app.routers.documents.scan_document_bytes", scanner_detects_malware)
+    _login(client, "testemployee@suredocs.example", "SecureEmp1!")
+    response = client.post(
+        "/api/documents/upload",
+        files={"file": ("infected.pdf", _PDF, "application/pdf")},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["latest_uploaded_version_status"] == "QUARANTINED"
+    version = db.execute(
+        select(DocumentVersion)
+        .join(Document, Document.id == DocumentVersion.document_id)
+        .where(Document.owner_user_id == active_employee.id)
+        .order_by(DocumentVersion.created_at.desc())
+    ).scalars().first()
+    assert version is not None and version.status == "QUARANTINED"
+    assert version.scan_completed_at is not None
+    document = db.get(Document, version.document_id)
+    assert document is not None and document.current_version_id is None
 
 
 def test_view_grant_allows_view_but_not_download_and_admin_is_not_implicitly_authorized(
@@ -290,6 +440,11 @@ def test_view_grant_allows_view_but_not_download_and_admin_is_not_implicitly_aut
 
     client.post("/api/auth/logout")
     _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+    denied_edit = client.patch(
+        f"/api/documents/{document.id}",
+        json={"title": "Unauthorized edit", "classification": "CONFIDENTIAL"},
+    )
+    assert denied_edit.status_code == 404
     viewed = client.get(f"/api/documents/{document.id}/view")
     assert viewed.status_code == 200
     assert viewed.content == _PDF
@@ -405,7 +560,7 @@ def test_client_side_preview_failure_is_audited_without_document_content(
     }
 
 
-def test_interrupted_view_delivery_updates_success_audit_to_failed(
+def test_interrupted_view_delivery_appends_failed_audit_without_rewriting_history(
     client: TestClient,
     db: Session,
     active_employee: User,
@@ -436,17 +591,20 @@ def test_interrupted_view_delivery_updates_success_audit_to_failed(
 
     assert response.status_code == 200
     db.expire_all()
-    event = db.execute(
+    events = db.execute(
         select(DocumentAuditLog).where(
             DocumentAuditLog.document_id_snapshot == document.id,
             DocumentAuditLog.action_type == "DOCUMENT_VIEWED",
         )
-    ).scalar_one()
-    assert event.result == "FAILED"
-    assert event.details["reason"] == "stream_interrupted"
+    ).scalars().all()
+    assert len(events) == 2
+    assert {(event.result, event.details.get("reason")) for event in events} == {
+        ("SUCCESS", None),
+        ("FAILED", "stream_interrupted"),
+    }
 
 
-def test_admin_cannot_soft_delete_another_users_document(
+def test_non_owner_cannot_soft_delete_another_users_document(
     client: TestClient,
     db: Session,
     active_employee: User,
@@ -456,7 +614,9 @@ def test_admin_cannot_soft_delete_another_users_document(
 
     response = client.delete(f"/api/documents/{document.id}")
 
-    assert response.status_code == 404
+    assert response.status_code == 403
+    missing_response = client.delete(f"/api/documents/{uuid.uuid4()}")
+    assert missing_response.status_code == 404
     edit_response = client.patch(
         f"/api/documents/{document.id}",
         json={"title": "Not permitted"},
@@ -471,6 +631,35 @@ def test_admin_cannot_soft_delete_another_users_document(
         )
     ).scalars().all()
     assert len(denied_events) == 2
+
+
+def test_edit_grant_does_not_allow_non_owner_to_delete_document(
+    client: TestClient,
+    db: Session,
+    active_admin: User,
+    active_employee: User,
+) -> None:
+    document = _seed_document(db, active_employee)
+    now = datetime.now(timezone.utc)
+    db.add(
+        DocumentPermission(
+            document_id=document.id,
+            user_id=active_admin.id,
+            can_view=True,
+            can_download=False,
+            can_edit=True,
+            granted_by_user_id=active_employee.id,
+            granted_at=now,
+        )
+    )
+    db.commit()
+    _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+
+    response = client.delete(f"/api/documents/{document.id}")
+
+    assert response.status_code == 403
+    db.refresh(document)
+    assert document.status == "ACTIVE"
 
 
 def test_replacing_content_adds_version_and_keeps_the_previous_version(
@@ -493,6 +682,7 @@ def test_replacing_content_adds_version_and_keeps_the_previous_version(
         return "replacement-s3-version"
 
     monkeypatch.setattr("app.routers.documents.put_document", fake_put)
+    monkeypatch.setattr("app.routers.documents.scan_document_bytes", lambda content: None)
     _login(client, "testemployee@suredocs.example", "SecureEmp1!")
     response = client.post(
         f"/api/documents/{document.id}/versions",
@@ -503,14 +693,20 @@ def test_replacing_content_adds_version_and_keeps_the_previous_version(
     payload = response.json()
     assert payload["current_version_number"] == 2
     assert payload["current_version_id"] != str(original_version_id)
+    assert payload["latest_uploaded_version_number"] == 2
+    assert payload["latest_uploaded_version_status"] == "AVAILABLE"
     assert uploaded["content"] == _PDF + b"new version"
-    assert uploaded["key"] == (
-        f"documents/{document.id}/versions/{payload['current_version_id']}/content"
-    )
+    new_version = db.execute(
+        select(DocumentVersion).where(
+            DocumentVersion.document_id == document.id,
+            DocumentVersion.version_number == 2,
+        )
+    ).scalar_one()
+    assert uploaded["key"] == new_version.storage_key
     old_version = db.get(DocumentVersion, original_version_id)
-    new_version = db.get(DocumentVersion, uuid.UUID(payload["current_version_id"]))
     assert old_version is not None and old_version.status == "AVAILABLE"
-    assert new_version is not None and new_version.status == "AVAILABLE"
+    assert new_version.status == "AVAILABLE"
+    assert new_version.scan_completed_at is not None
 
 
 def test_owner_soft_delete_retains_versions_and_records_audit(

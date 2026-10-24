@@ -99,11 +99,18 @@ LOCKOUT_DURATION_SECONDS: int = 15 * 60  # 15 minutes
 
 # Private document object storage settings; AWS credentials use the SDK chain.
 AWS_REGION: str = os.getenv("SUREDOCS_AWS_REGION", "ap-south-1")
+AWS_MFA_KMS_KEY_ID: str | None = os.getenv("SUREDOCS_MFA_KMS_KEY_ID") or None
 S3_BUCKET: str = os.getenv(
     "SUREDOCS_S3_BUCKET",
     "suredocs-private-documents-dev",
 )
 MAX_DOCUMENT_SIZE_BYTES: int = 50 * 1024 * 1024
+CLAMAV_HOST: str = os.getenv("SUREDOCS_CLAMAV_HOST", "127.0.0.1")
+CLAMAV_PORT: int = int(os.getenv("SUREDOCS_CLAMAV_PORT", "3310"))
+CLAMAV_TIMEOUT_SECONDS: float = float(
+    os.getenv("SUREDOCS_CLAMAV_TIMEOUT_SECONDS", "120")
+)
+CLAMAV_STREAM_CHUNK_BYTES: int = 64 * 1024
 
 # ---------------------------------------------------------------------------
 # Password policy

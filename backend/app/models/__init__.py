@@ -8,3 +8,9 @@ from app.models.documents import (  # noqa: F401
     DocumentPermission,
     DocumentVersion,
 )
+from app.models.persistence import (  # noqa: F401
+    AccessRequest,
+    Notification,
+    UserMfaMethod,
+    UserPreference,
+)

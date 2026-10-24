@@ -8,7 +8,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,12 @@ class AuthEventType(str, enum.Enum):
     ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
     SESSION_REVOKED = "SESSION_REVOKED"
     AUTH_REJECTED_INACTIVE = "AUTH_REJECTED_INACTIVE"
+    PASSWORD_CHANGED = "PASSWORD_CHANGED"
+    MFA_ENABLED = "MFA_ENABLED"
+    MFA_DISABLED = "MFA_DISABLED"
+    MFA_REJECTED = "MFA_REJECTED"
+    USER_ROLE_CHANGED = "USER_ROLE_CHANGED"
+    USER_STATUS_CHANGED = "USER_STATUS_CHANGED"
 
 
 class AuthEvent(Base):
@@ -73,6 +79,13 @@ class AuthEvent(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('LOGIN_SUCCESS', 'LOGIN_FAILED', 'LOGOUT', "
+            "'ACCOUNT_LOCKED', 'SESSION_REVOKED', 'AUTH_REJECTED_INACTIVE', "
+            "'PASSWORD_CHANGED', 'MFA_ENABLED', 'MFA_DISABLED', 'MFA_REJECTED', "
+            "'USER_ROLE_CHANGED', 'USER_STATUS_CHANGED')",
+            name="ck_auth_events_event_type",
+        ),
         Index("ix_auth_events_user_id", "user_id"),
         Index("ix_auth_events_event_type", "event_type"),
         Index("ix_auth_events_occurred_at", "occurred_at"),

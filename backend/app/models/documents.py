@@ -229,6 +229,9 @@ class DocumentPermission(Base):
     )
     can_view: Mapped[bool] = mapped_column(Boolean, nullable=False)
     can_download: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    can_edit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+    )
     granted_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
@@ -281,6 +284,10 @@ class DocumentPermission(Base):
             "can_download = FALSE OR can_view = TRUE",
             name="ck_document_permissions_download_requires_view",
         ),
+        CheckConstraint(
+            "can_edit = FALSE OR can_view = TRUE",
+            name="ck_document_permissions_edit_requires_view",
+        ),
         Index("ix_document_permissions_user_document", "user_id", "document_id"),
     )
 
@@ -291,7 +298,8 @@ class DocumentPermission(Base):
         return (
             self.revoked_at is None
             and (self.expires_at is None or self.expires_at > now)
-            and self.document.status != "DELETED"
+            and self.document.status == "ACTIVE"
+            and self.document.deleted_at is None
         )
 
 
@@ -351,8 +359,11 @@ class DocumentAuditLog(Base):
             "action_type IN ('DOCUMENT_UPLOADED', 'DOCUMENT_VIEWED', "
             "'DOCUMENT_DOWNLOADED', 'DOCUMENT_METADATA_UPDATED', "
             "'DOCUMENT_VERSION_CREATED', 'DOCUMENT_DELETED', "
-            "'DOCUMENT_RESTORED', 'PERMISSION_GRANTED', 'PERMISSION_REVOKED', "
-            "'UPLOAD_REJECTED', 'ACCESS_DENIED')",
+            "'DOCUMENT_RESTORED', 'DOCUMENT_SCAN_COMPLETED', "
+            "'PERMISSION_GRANTED', 'PERMISSION_REVOKED', "
+            "'UPLOAD_REJECTED', 'ACCESS_DENIED', 'ACCESS_REQUEST_SUBMITTED', "
+            "'ACCESS_REQUEST_APPROVED', 'ACCESS_REQUEST_DENIED', "
+            "'ACCESS_REQUEST_CANCELLED')",
             name="ck_document_audit_logs_action_type",
         ),
         CheckConstraint(

@@ -36,8 +36,10 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.models.auth_event import AuthEvent, AuthEventType
+from app.models.persistence import UserMfaMethod
 from app.models.user import AccountStatus, User
 from app.models.user_session import UserSession
+from app.services.mfa import MfaServiceUnavailable, decrypt_totp_secret, verify_totp
 from app.schemas.auth import (
     ErrorResponse,
     HealthResponse,
@@ -224,6 +226,47 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=_LOGIN_FAILED_MSG,
         )
+
+    # If TOTP is enabled, a correct password alone cannot create a session.
+    mfa_method = db.execute(
+        select(UserMfaMethod)
+        .where(
+            UserMfaMethod.user_id == user.id,
+            UserMfaMethod.method_type == "TOTP",
+            UserMfaMethod.is_enabled.is_(True),
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
+    if mfa_method is not None:
+        try:
+            secret = decrypt_totp_secret(mfa_method.secret_ciphertext)
+        except MfaServiceUnavailable as exc:
+            _record_event(db, AuthEventType.MFA_REJECTED, user.id, request,
+                          {"reason": "verification_unavailable"})
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication is temporarily unavailable.",
+            ) from exc
+        counter = verify_totp(
+            secret,
+            body.totp_code or "",
+            last_used_counter=mfa_method.last_used_counter,
+        )
+        if counter is None:
+            user.failed_login_attempts += 1
+            if user.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
+                user.locked_until = now + timedelta(seconds=LOCKOUT_DURATION_SECONDS)
+                _record_event(db, AuthEventType.ACCOUNT_LOCKED, user.id, request,
+                              {"reason": "max_failed_attempts", "attempts": user.failed_login_attempts})
+            _record_event(db, AuthEventType.MFA_REJECTED, user.id, request,
+                          {"reason": "missing_or_invalid_code"})
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authenticator code required or invalid.",
+            )
+        mfa_method.last_used_counter = counter
 
     # 7. Successful authentication — reset failed attempts
     user.failed_login_attempts = 0

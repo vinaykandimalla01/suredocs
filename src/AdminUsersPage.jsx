@@ -1,384 +1,363 @@
-import { useEffect, useState } from 'react'
-import { apiGet } from './api.js'
+﻿import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import UserAvatar from './UserAvatar.jsx'
+const UserProfileModal = lazy(() => import('./UserProfileModal.jsx'))
+import { apiGet, apiPatch } from './api.js'
+import './AdminUsersPage.css'
 
-const pageSize = 10
-const statusLabels = {
-  ACTIVE: 'Active',
-  DISABLED: 'Disabled',
-  PENDING: 'Pending',
-  SUSPENDED: 'Suspended',
+const pageSize = 8
+const validStatuses = ['all', 'active', 'disabled', 'pending']
+const titleCase = (value) => value.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase())
+
+function Icon({ name, className = '' }) {
+  const paths = {
+    users: <><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="10" cy="7" r="4" /><path d="M20 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8" /></>,
+    active: <><circle cx="12" cy="7" r="4" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" /></>,
+    disabled: <><circle cx="12" cy="12" r="9" /><path d="m6 6 12 12" /></>,
+    pending: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    search: <><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4 4" /></>,
+    filter: <path d="M4 5h16l-6.2 7.2v5L10 19v-6.8L4 5Z" />,
+    chevron: <path d="m9 18 6-6-6-6" />,
+    previous: <path d="m15 18-6-6 6-6" />,
+    next: <path d="m9 18 6-6-6-6" />,
+    close: <path d="m18 6-12 12M6 6l12 12" />,
+  }
+
+  return <svg aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">{paths[name]}</svg>
 }
 
-function formatDate(value) {
-  if (!value) return 'Never'
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeZone: 'UTC',
-  }).format(new Date(value))
+function FlowingWave() {
+  return (
+    <div aria-hidden="true" className="user-management-wave">
+      <svg className="user-management-wave-svg" preserveAspectRatio="none" viewBox="0 0 1440 220">
+        <defs>
+          <linearGradient id="user-wave-blue" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stopColor="#e6f0ff"><animate attributeName="stop-color" dur="22s" repeatCount="indefinite" values="#e6f0ff;#edf6ff;#ddecff;#e6f0ff" /></stop>
+            <stop offset="58%" stopColor="#dceaff"><animate attributeName="stop-color" dur="22s" repeatCount="indefinite" values="#dceaff;#e8f5ff;#d9eaff;#dceaff" /></stop>
+            <stop offset="100%" stopColor="#f2f8ff"><animate attributeName="stop-color" dur="22s" repeatCount="indefinite" values="#f2f8ff;#e7f2ff;#f4faff;#f2f8ff" /></stop>
+          </linearGradient>
+          <linearGradient id="user-wave-sky" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#c9e1ff"><animate attributeName="stop-color" dur="27s" repeatCount="indefinite" values="#c9e1ff;#d8efff;#c7ddff;#c9e1ff" /></stop>
+            <stop offset="100%" stopColor="#e8f3ff"><animate attributeName="stop-color" dur="27s" repeatCount="indefinite" values="#e8f3ff;#dcecff;#eaf7ff;#e8f3ff" /></stop>
+          </linearGradient>
+          <linearGradient id="user-wave-ice" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#f0f7ff"><animate attributeName="stop-color" dur="19s" repeatCount="indefinite" values="#f0f7ff;#e5f5ff;#eff3ff;#f0f7ff" /></stop>
+            <stop offset="100%" stopColor="#dceaff"><animate attributeName="stop-color" dur="19s" repeatCount="indefinite" values="#dceaff;#eef5ff;#dcefff;#dceaff" /></stop>
+          </linearGradient>
+        </defs>
+        <path className="user-wave-layer user-wave-layer-back" d="M0 96 C180 24 245 190 420 124 C610 48 690 184 880 114 C1065 46 1145 166 1305 84 C1360 56 1405 59 1440 78 L1440 220 L0 220 Z" fill="url(#user-wave-ice)">
+          <animate attributeName="d" dur="31s" repeatCount="indefinite" values="M0 96 C180 24 245 190 420 124 C610 48 690 184 880 114 C1065 46 1145 166 1305 84 C1360 56 1405 59 1440 78 L1440 220 L0 220 Z;M0 76 C170 144 252 26 420 96 C605 168 696 30 880 92 C1052 156 1157 29 1305 96 C1364 118 1406 111 1440 86 L1440 220 L0 220 Z;M0 112 C172 40 255 174 420 110 C598 42 696 188 880 126 C1050 63 1159 183 1305 108 C1367 80 1404 68 1440 96 L1440 220 L0 220 Z;M0 96 C180 24 245 190 420 124 C610 48 690 184 880 114 C1065 46 1145 166 1305 84 C1360 56 1405 59 1440 78 L1440 220 L0 220 Z" />
+        </path>
+        <path className="user-wave-layer user-wave-layer-middle" d="M0 116 C165 180 270 42 444 104 C610 164 733 48 912 101 C1083 153 1194 40 1340 105 C1380 122 1410 121 1440 106 L1440 220 L0 220 Z" fill="url(#user-wave-blue)">
+          <animate attributeName="d" dur="25s" repeatCount="indefinite" values="M0 116 C165 180 270 42 444 104 C610 164 733 48 912 101 C1083 153 1194 40 1340 105 C1380 122 1410 121 1440 106 L1440 220 L0 220 Z;M0 104 C180 43 276 178 444 116 C625 49 727 169 912 111 C1076 48 1198 164 1340 94 C1382 76 1410 82 1440 103 L1440 220 L0 220 Z;M0 126 C166 166 276 56 444 122 C610 188 728 38 912 96 C1080 160 1185 58 1340 118 C1386 136 1413 126 1440 115 L1440 220 L0 220 Z;M0 116 C165 180 270 42 444 104 C610 164 733 48 912 101 C1083 153 1194 40 1340 105 C1380 122 1410 121 1440 106 L1440 220 L0 220 Z" />
+        </path>
+        <path className="user-wave-layer user-wave-layer-front" d="M0 132 C178 70 260 188 438 126 C620 63 716 180 896 122 C1067 68 1175 177 1330 123 C1380 106 1410 109 1440 124 L1440 220 L0 220 Z" fill="url(#user-wave-sky)">
+          <animate attributeName="d" dur="29s" repeatCount="indefinite" values="M0 132 C178 70 260 188 438 126 C620 63 716 180 896 122 C1067 68 1175 177 1330 123 C1380 106 1410 109 1440 124 L1440 220 L0 220 Z;M0 116 C174 184 260 65 438 116 C622 171 718 56 896 111 C1064 174 1174 54 1330 108 C1384 127 1412 125 1440 112 L1440 220 L0 220 Z;M0 142 C180 78 260 170 438 132 C616 96 720 188 896 129 C1071 72 1178 176 1330 133 C1380 118 1412 116 1440 130 L1440 220 L0 220 Z;M0 132 C178 70 260 188 438 126 C620 63 716 180 896 122 C1067 68 1175 177 1330 123 C1380 106 1410 109 1440 124 L1440 220 L0 220 Z" />
+        </path>
+      </svg>
+    </div>
+  )
 }
 
-function UserDetailsDialog({ userId, onClose }) {
-  const [user, setUser] = useState(null)
-  const [error, setError] = useState('')
+function Trend({ tone }) {
+  if (tone === 'active') {
+    return <span aria-hidden="true" className="user-summary-bars"><i /><i /><i /><i /><i /><i /></span>
+  }
+  return (
+    <svg aria-hidden="true" className="user-summary-line" viewBox="0 0 100 34" preserveAspectRatio="none">
+      <path className="user-summary-line-area" d="M0 27 C15 24 19 21 28 24 S47 29 59 19 S77 15 86 12 S95 14 100 7 V34 H0Z" />
+      <path className="user-summary-line-stroke" d="M0 27 C15 24 19 21 28 24 S47 29 59 19 S77 15 86 12 S95 14 100 7" />
+    </svg>
+  )
+}
 
-  useEffect(() => {
-    const controller = new AbortController()
-    apiGet(`/api/admin/users/${encodeURIComponent(userId)}`, { signal: controller.signal })
-      .then(setUser)
-      .catch((requestError) => {
-        if (requestError.name !== 'AbortError') setError(requestError.message)
-      })
-    return () => controller.abort()
-  }, [userId])
+function SummaryCard({ label, value, detail, tone, icon }) {
+  return (
+    <article className={'user-summary-card ' + tone}>
+      <span className="user-summary-icon"><Icon name={icon} /></span>
+      <div className="user-summary-copy">
+        <span className="user-summary-label">{label}</span>
+        <strong>{value}</strong>
+        <small>{detail}</small>
+      </div>
+      <span aria-hidden="true" className="user-summary-arrow"><Icon name="chevron" /></span>
+      <Trend tone={tone} />
+    </article>
+  )
+}
 
+function UserActionDialog({ user, mode, onClose, onSave }) {
+  const [form, setForm] = useState({
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    department: user.department,
+    status: user.status,
+  })
   useEffect(() => {
-    function handleKeyDown(event) {
+    function closeOnEscape(event) {
       if (event.key === 'Escape') onClose()
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
   }, [onClose])
 
+  function update(field, value) {
+    setForm((current) => ({ ...current, [field]: value }))
+  }
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 p-4 sm:items-center"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
-      <section
-        aria-labelledby="user-details-title"
-        aria-modal="true"
-        className="my-auto w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7"
-        role="dialog"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900" id="user-details-title">
-            User details
-          </h2>
-          <button
-            aria-label="Close user details"
-            className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100"
-            onClick={onClose}
-            type="button"
-          >
-            Close
-          </button>
+    <div className="user-action-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section aria-labelledby="user-action-title" aria-modal="true" className="user-action-dialog" role="dialog">
+        <div className="user-action-dialog-heading">
+          <div>
+            <h2 id="user-action-title">{mode === 'view' ? 'User profile' : mode === 'role' ? 'Change role' : 'Edit user'}</h2>
+            <p>{user.name} <span>·</span> {user.email}</p>
+          </div>
+          <button aria-label="Close dialog" className="user-action-close" onClick={onClose} type="button"><Icon name="close" /></button>
         </div>
-        {error ? (
-          <p className="mt-5 rounded-lg bg-rose-50 p-3 text-sm text-rose-800" role="alert">{error}</p>
-        ) : !user ? (
-          <p className="mt-5 text-sm text-slate-500" role="status">Loading user details…</p>
+        {mode === 'view' ? (
+          <dl className="user-profile-details">
+            {[
+              ['Role', user.role],
+              ['Department', user.department],
+              ['Account status', user.status],
+              ['Email', user.email],
+            ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+          </dl>
         ) : (
-          <>
-            <div className="mt-5 flex items-center gap-4 border-b border-slate-100 pb-5">
-              <UserAvatar className="h-14 w-14 text-lg" email={user.email} fullName={user.full_name} />
-              <div className="min-w-0">
-                <h3 className="font-semibold text-slate-900">{user.full_name}</h3>
-                <p className="break-all text-sm text-slate-500">{user.email}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {user.role} · {statusLabels[user.account_status] ?? user.account_status}
-                </p>
-              </div>
+          <form className="user-edit-form" onSubmit={(event) => { event.preventDefault(); onSave(form) }}>
+            {mode === 'edit' && <>
+              <label>Full name<input onChange={(event) => update('name', event.target.value)} required value={form.name} /></label>
+              <label>Email address<input onChange={(event) => update('email', event.target.value)} required type="email" value={form.email} /></label>
+              <label>Department<input onChange={(event) => update('department', event.target.value)} required value={form.department} /></label>
+              <label>Account status<select onChange={(event) => update('status', event.target.value)} value={form.status}><option>Active</option><option>Pending</option><option>Disabled</option></select></label>
+            </>}
+            <label>Role<select onChange={(event) => update('role', event.target.value)} value={form.role}><option>Admin</option><option>Manager</option><option>Employee</option></select></label>
+            <div className="user-action-dialog-footer">
+              <button className="user-button-secondary" onClick={onClose} type="button">Cancel</button>
+              <button className="user-button-primary" type="submit">Save changes</button>
             </div>
-            <dl className="mt-5 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-              {[
-                ['User ID', user.id],
-                ['Employee code', user.employee_code || '—'],
-                ['Department', user.department || '—'],
-                ['Job title', user.job_title || '—'],
-                ['Email verified', formatDate(user.email_verified_at)],
-                ['Created', formatDate(user.created_at)],
-                ['Updated', formatDate(user.updated_at)],
-                ['Last login', formatDate(user.last_login_at)],
-                ['Password changed', formatDate(user.password_changed_at)],
-                [
-                  'Created by',
-                  user.created_by
-                    ? `${user.created_by.full_name} (${user.created_by.email})`
-                    : '—',
-                ],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <dt className="text-xs text-slate-500">{label}</dt>
-                  <dd className="mt-1 break-words text-sm font-medium text-slate-800">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </>
+          </form>
         )}
+        {mode === 'view' && <div className="user-action-dialog-footer"><button className="user-button-secondary" onClick={onClose} type="button">Close</button></div>}
       </section>
     </div>
   )
 }
 
-export default function AdminUsersPage({ initialFilter = 'all', refreshKey = 0 }) {
+export default function AdminUsersPage({ initialFilter = 'all' }) {
   const [users, setUsers] = useState([])
-  const [summary, setSummary] = useState(null)
+  const [summary, setSummary] = useState({ total: 0, active: 0, disabled: 0, pending: 0 })
+  const [totalUsers, setTotalUsers] = useState(0)
+  const [pageCount, setPageCount] = useState(1)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
   const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [role, setRole] = useState('')
-  const [status, setStatus] = useState(['all', 'active', 'disabled', 'pending'].includes(initialFilter) ? initialFilter : 'all')
-  const [department, setDepartment] = useState('')
-  const [sortBy, setSortBy] = useState('created-desc')
+  const [statusFilter, setStatusFilter] = useState(validStatuses.includes(initialFilter) ? initialFilter : 'all')
   const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
-  const [pages, setPages] = useState(0)
-  const [selectedUserId, setSelectedUserId] = useState(null)
-  const [loadedUrl, setLoadedUrl] = useState(null)
-  const [error, setError] = useState('')
+  const [openMenuId, setOpenMenuId] = useState(null)
+  const [actionDialog, setActionDialog] = useState(null)
+  const [profileUser, setProfileUser] = useState(null)
+  const [notice, setNotice] = useState('')
+  const menuRef = useRef(null)
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => setDebouncedSearch(search.trim()), 250)
-    return () => window.clearTimeout(timeout)
-  }, [search])
+    const controller = new AbortController()
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize), sort_by: 'created-desc' })
+    if (search.trim()) params.set('search', search.trim())
+    if (statusFilter !== 'all') params.set('status', statusFilter.toUpperCase())
+    setLoading(true)
+    setLoadError('')
+    Promise.all([
+      apiGet('/api/admin/users?' + params.toString(), { signal: controller.signal }),
+      apiGet('/api/admin/users/summary', { signal: controller.signal }),
+    ])
+      .then(([pageData, summaryData]) => {
+        setUsers(pageData.items.map((user) => ({
+          id: user.id,
+          name: user.full_name,
+          email: user.email,
+          role: titleCase(user.role),
+          department: user.department || '—',
+          status: titleCase(user.account_status),
+          avatarTone: 'blue',
+        })))
+        setTotalUsers(pageData.total)
+        setPageCount(Math.max(1, pageData.pages))
+        setSummary({
+          total: summaryData.total_users,
+          active: summaryData.active_users,
+          disabled: summaryData.disabled_users,
+          pending: summaryData.pending_users,
+        })
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setLoadError(error.message || 'Users could not be loaded.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
+  }, [page, search, statusFilter, refreshKey])
 
   useEffect(() => {
-    function syncStatusFilter() {
-      const filter = new URLSearchParams(window.location.search).get('filter') ?? 'all'
-      setStatus(['all', 'active', 'disabled', 'pending'].includes(filter) ? filter : 'all')
-      setPage(1)
+    if (!openMenuId) return undefined
+    function closeMenu(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setOpenMenuId(null)
     }
-    window.addEventListener('popstate', syncStatusFilter)
-    return () => window.removeEventListener('popstate', syncStatusFilter)
-  }, [])
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') setOpenMenuId(null)
+    }
+    document.addEventListener('mousedown', closeMenu)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeMenu)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [openMenuId])
 
-  useEffect(() => {
-    const controller = new AbortController()
-    apiGet('/api/admin/users/summary', { signal: controller.signal })
-      .then(setSummary)
-      .catch((requestError) => {
-        if (requestError.name !== 'AbortError') setError(requestError.message)
-      })
-    return () => controller.abort()
-  }, [refreshKey])
+  const currentPage = Math.min(page, pageCount)
+  const visibleUsers = users
+  const start = totalUsers ? (currentPage - 1) * pageSize + 1 : 0
+  const end = Math.min(currentPage * pageSize, totalUsers)
 
-  const params = new URLSearchParams({
-    page: String(page),
-    page_size: String(pageSize),
-    sort_by: sortBy,
-  })
-  if (debouncedSearch) params.set('search', debouncedSearch)
-  if (role) params.set('role', role)
-  if (status !== 'all') params.set('status', status.toUpperCase())
-  if (department.trim()) params.set('department', department.trim())
-  const listUrl = `/api/admin/users?${params}`
-  const loading = loadedUrl !== listUrl
-
-  useEffect(() => {
-    const controller = new AbortController()
-    apiGet(listUrl, { signal: controller.signal })
-      .then((result) => {
-        setUsers(result.items)
-        setTotal(result.total)
-        setPages(result.pages)
-        setLoadedUrl(listUrl)
-        setError('')
-      })
-      .catch((requestError) => {
-        if (requestError.name !== 'AbortError') {
-          setUsers([])
-          setTotal(0)
-          setPages(0)
-          setError(requestError.message)
-          setLoadedUrl(listUrl)
-        }
-      })
-    return () => controller.abort()
-  }, [listUrl, refreshKey])
-
-  function changeStatusFilter(value) {
-    setStatus(value)
+  function changeSearch(value) {
+    setSearch(value)
     setPage(1)
-    const url = value === 'all' ? '/admin/users?filter=all' : `/admin/users?filter=${value}`
-    window.history.pushState({}, '', url)
   }
 
-  const tabs = [
-    ['all', 'All users', summary?.total_users],
-    ['active', 'Active', summary?.active_users],
-    ['disabled', 'Disabled', summary?.disabled_users],
-    ['pending', 'Pending', summary?.pending_users],
-  ]
+  function changeStatus(value) {
+    setStatusFilter(value)
+    setPage(1)
+  }
+
+  async function runAction(user, action) {
+    setOpenMenuId(null)
+    if (action === 'view') {
+      setProfileUser(user)
+      return
+    }
+    if (action === 'toggle') {
+      const accountStatus = user.status === 'Disabled' ? 'ACTIVE' : 'DISABLED'
+      try {
+        await apiPatch('/api/admin/users/' + encodeURIComponent(user.id), { account_status: accountStatus })
+        setNotice(user.name + ' was ' + (accountStatus === 'ACTIVE' ? 'enabled' : 'disabled') + '.')
+        setRefreshKey((value) => value + 1)
+      } catch (error) {
+        setNotice(error.message || 'The account status could not be changed.')
+      }
+      return
+    }
+    setActionDialog({ user, mode: action })
+  }
+
+  async function saveUser(changes) {
+    const selected = actionDialog.user
+    if (changes.email.trim().toLowerCase() !== selected.email.toLowerCase()) {
+      setNotice('Email changes require an email verification workflow, which is not configured.')
+      return
+    }
+    const body = {
+      full_name: changes.name,
+      role: changes.role.toUpperCase(),
+      department: changes.department || null,
+      account_status: changes.status.toUpperCase(),
+    }
+    try {
+      await apiPatch('/api/admin/users/' + encodeURIComponent(selected.id), body)
+      setNotice(selected.name + ' was updated.')
+      setActionDialog(null)
+      setRefreshKey((value) => value + 1)
+    } catch (error) {
+      setNotice(error.message || 'The user could not be updated.')
+    }
+  }
+
+  const closeProfile = useCallback(() => setProfileUser(null), [])
+
+  function updateProfileUser(changes) {
+    setProfileUser((current) => current ? { ...current, ...changes } : current)
+  }
+
+  function openProfileFromRow(event, user) {
+    if (event.target.closest('button, a, input, select')) return
+    setProfileUser(user)
+  }
 
   return (
-    <div className="space-y-4">
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {[
-          ['Total users', summary?.total_users, 'text-blue-700'],
-          ['Active users', summary?.active_users, 'text-emerald-700'],
-          ['Disabled users', summary?.disabled_users, 'text-rose-700'],
-          ['Administrators', summary?.administrator_users, 'text-violet-700'],
-        ].map(([label, value, tone]) => (
-          <div className="rounded-xl border border-slate-200 bg-white p-4" key={label}>
-            <p className={`text-xs font-medium ${tone}`}>{label}</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">{value ?? '—'}</p>
-          </div>
-        ))}
-      </section>
+    <section aria-label="User management" className="user-management-page">
+      <FlowingWave />
+      <div className="user-summary-grid">
+        <SummaryCard detail="All registered users" icon="users" label="Total Users" tone="total" value={summary.total} />
+        <SummaryCard detail="Currently active" icon="active" label="Active Users" tone="active" value={summary.active} />
+        <SummaryCard detail="Deactivated accounts" icon="disabled" label="Disabled Users" tone="disabled" value={summary.disabled} />
+        <SummaryCard detail="Awaiting activation" icon="pending" label="Pending Users" tone="pending" value={summary.pending} />
+      </div>
 
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <nav aria-label="Filter users by account status" className="flex gap-5 overflow-x-auto border-b border-slate-200 px-4 pt-3">
-          {tabs.map(([value, label, count]) => (
-            <button
-              aria-pressed={status === value}
-              className={`whitespace-nowrap border-b-2 px-0.5 pb-3 text-xs font-medium ${
-                status === value ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500'
-              }`}
-              key={value}
-              onClick={() => changeStatusFilter(value)}
-              type="button"
-            >
-              {label}<span className="ml-1.5 text-slate-400">{count ?? '—'}</span>
-            </button>
-          ))}
-        </nav>
+      <div className="user-management-controls">
+        <label className="user-search-box">
+          <Icon className="user-control-icon" name="search" />
+          <span className="sr-only">Search users by name, email, or department</span>
+          <input onChange={(event) => changeSearch(event.target.value)} placeholder="Search users by name, email, department..." type="search" value={search} />
+        </label>
+        <label className="user-status-filter">
+          <Icon className="user-control-icon" name="filter" />
+          <span className="sr-only">Filter users by status</span>
+          <select onChange={(event) => changeStatus(event.target.value)} value={statusFilter}>
+            <option value="all">All Users</option>
+            <option value="active">Active</option>
+            <option value="disabled">Disabled</option>
+            <option value="pending">Pending</option>
+          </select>
+          <Icon className="user-filter-chevron" name="chevron" />
+        </label>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
-          <label className="min-w-[220px] flex-1">
-            <span className="sr-only">Search name or email</span>
-            <input
-              className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              onChange={(event) => {
-                setSearch(event.target.value)
-                setPage(1)
-              }}
-              placeholder="Search name or email"
-              type="search"
-              value={search}
-            />
-          </label>
-          <label className="text-xs text-slate-500">
-            <span className="sr-only">Filter by role</span>
-            <select
-              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700"
-              onChange={(event) => {
-                setRole(event.target.value)
-                setPage(1)
-              }}
-              value={role}
-            >
-              <option value="">All roles</option>
-              <option value="ADMIN">Administrator</option>
-              <option value="EMPLOYEE">Employee</option>
-            </select>
-          </label>
-          <label className="text-xs text-slate-500">
-            <span className="sr-only">Filter by department</span>
-            <input
-              className="h-9 w-40 rounded-lg border border-slate-200 px-3 text-xs text-slate-700"
-              onChange={(event) => {
-                setDepartment(event.target.value)
-                setPage(1)
-              }}
-              placeholder="Department"
-              value={department}
-            />
-          </label>
-          <label className="text-xs text-slate-500">
-            <span className="sr-only">Sort users</span>
-            <select
-              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700"
-              onChange={(event) => {
-                setSortBy(event.target.value)
-                setPage(1)
-              }}
-              value={sortBy}
-            >
-              <option value="created-desc">Newest created</option>
-              <option value="created-asc">Oldest created</option>
-              <option value="name-asc">Name A–Z</option>
-              <option value="last-login-desc">Recent login</option>
-            </select>
-          </label>
-          <button
-            className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            onClick={() => {
-              setSearch('')
-              setRole('')
-              setDepartment('')
-              setSortBy('created-desc')
-              changeStatusFilter('all')
-            }}
-            type="button"
-          >
-            Clear filters
-          </button>
-        </div>
+      {(loadError || notice) && <div className="user-action-notice" role="status"><span>{loadError || notice}</span><button aria-label="Dismiss notice" onClick={() => { setNotice(''); setLoadError('') }} type="button"><Icon name="close" /></button></div>}
 
-        {error && <p className="border-b border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">{error}</p>}
-        {loading && <p className="px-4 py-3 text-sm text-slate-500" role="status">Loading accounts…</p>}
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] border-collapse text-left">
-            <thead className="bg-slate-50">
-              <tr className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                {['User', 'Email', 'Employee code', 'Role', 'Department', 'Job title', 'Status', 'Created', 'Last login', ''].map((heading, index) => (
-                  <th className="px-3 py-3 first:pl-5" key={`${heading}-${index}`}>{heading}</th>
-                ))}
-              </tr>
-            </thead>
+      <div className="user-table-shell">
+        <div className="user-table-scroll">
+          <table className="user-management-table">
+            <colgroup><col className="user-col-name" /><col className="user-col-email" /><col className="user-col-role" /><col className="user-col-department" /><col className="user-col-status" /><col className="user-col-actions" /></colgroup>
+            <thead><tr>{['User', 'Email', 'Role', 'Department', 'Account Status', 'Actions'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
             <tbody>
-              {!loading && users.map((user) => (
-                <tr className="border-t border-slate-100 hover:bg-slate-50/70" key={user.id}>
-                  <td className="whitespace-nowrap px-3 py-3 pl-5">
-                    <span className="flex items-center gap-2.5">
-                      <UserAvatar email={user.email} fullName={user.full_name} />
-                      <span className="text-xs font-semibold text-slate-800">{user.full_name}</span>
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-xs text-slate-600">{user.email}</td>
-                  <td className="px-3 py-3 text-xs text-slate-600">{user.employee_code || '—'}</td>
-                  <td className="px-3 py-3 text-xs text-slate-600">{user.role}</td>
-                  <td className="px-3 py-3 text-xs text-slate-600">{user.department || '—'}</td>
-                  <td className="px-3 py-3 text-xs text-slate-600">{user.job_title || '—'}</td>
-                  <td className="px-3 py-3 text-xs text-slate-600">{statusLabels[user.account_status] ?? user.account_status}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-xs text-slate-500">{formatDate(user.created_at)}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-xs text-slate-500">{formatDate(user.last_login_at)}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-right">
-                    <button
-                      className="rounded-md px-2 py-1.5 text-[11px] font-medium text-blue-700 hover:bg-blue-50"
-                      onClick={() => setSelectedUserId(user.id)}
-                      type="button"
-                    >
-                      View details
-                    </button>
+              {visibleUsers.map((user) => (
+                <tr aria-label={`View profile for ${user.name}`} key={user.id} onClick={(event) => openProfileFromRow(event, user)} onKeyDown={(event) => { if (event.target !== event.currentTarget && event.target.closest('button, a, input, select')) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setProfileUser(user) } }} tabIndex={0}>
+                  <td><span className="user-table-person"><UserAvatar className={'user-management-avatar ' + user.avatarTone} email={user.email} fullName={user.name} /><span>{user.name}</span></span></td>
+                  <td className="user-table-email" title={user.email}>{user.email}</td>
+                  <td><span className={'user-role-badge ' + user.role.toLowerCase()}>{user.role}</span></td>
+                  <td className="user-table-department">{user.department}</td>
+                  <td><span className={'user-status-badge ' + user.status.toLowerCase()}><i />{user.status}</span></td>
+                  <td className="user-actions-cell">
+                    <div className="user-actions-wrap" ref={openMenuId === user.id ? menuRef : null}>
+                      <button aria-expanded={openMenuId === user.id} aria-label={'Actions for ' + user.name} className="user-actions-button" onClick={(event) => { event.stopPropagation(); setOpenMenuId((current) => current === user.id ? null : user.id) }} type="button">⋮</button>
+                      {openMenuId === user.id && <div className="user-actions-menu" role="menu">
+                        <button onClick={() => runAction(user, 'view')} role="menuitem" type="button">View Profile</button>
+                        <button onClick={() => runAction(user, 'edit')} role="menuitem" type="button">Edit User</button>
+                        <button onClick={() => runAction(user, 'role')} role="menuitem" type="button">Change Role</button>
+                        <button className={user.status === 'Disabled' ? 'enable-action' : 'disable-action'} onClick={() => runAction(user, 'toggle')} role="menuitem" type="button">{user.status === 'Disabled' ? 'Enable Account' : 'Disable Account'}</button>
+                      </div>}
+                    </div>
                   </td>
                 </tr>
               ))}
-              {!loading && users.length === 0 && (
-                <tr><td className="px-5 py-12 text-center text-sm text-slate-500" colSpan={10}>No matching accounts.</td></tr>
-              )}
+              {visibleUsers.length === 0 && <tr><td className="user-empty-state" colSpan={6}>{loading ? 'Loading users…' : 'No users match your search or status filter.'}</td></tr>}
             </tbody>
           </table>
         </div>
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
-          <p className="text-[11px] text-slate-500">{total ? `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total} accounts` : 'No matching accounts'}</p>
-          <div className="flex items-center gap-2">
-            <button
-              className="rounded-md border border-slate-200 px-3 py-1.5 text-[11px] disabled:opacity-40"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              type="button"
-            >
-              Previous
-            </button>
-            <span className="text-[11px] text-slate-500">Page {page} of {Math.max(1, pages)}</span>
-            <button
-              className="rounded-md border border-slate-200 px-3 py-1.5 text-[11px] disabled:opacity-40"
-              disabled={page >= pages || loading}
-              onClick={() => setPage((current) => Math.min(pages, current + 1))}
-              type="button"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      </section>
+        <footer className="user-table-footer">
+          <p>Showing {start}–{end} of {totalUsers} users</p>
+          <nav aria-label="User pages" className="user-pagination">
+            <button aria-label="Previous page" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button"><Icon name="previous" /></button>
+            {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <button aria-current={currentPage === pageNumber ? 'page' : undefined} className={currentPage === pageNumber ? 'current-page' : ''} key={pageNumber} onClick={() => setPage(pageNumber)} type="button">{pageNumber}</button>)}
+            <button aria-label="Next page" disabled={currentPage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} type="button"><Icon name="next" /></button>
+          </nav>
+        </footer>
+      </div>
 
-      {selectedUserId && (
-        <UserDetailsDialog onClose={() => setSelectedUserId(null)} userId={selectedUserId} />
-      )}
-    </div>
+      {actionDialog && <UserActionDialog mode={actionDialog.mode} onClose={() => setActionDialog(null)} onSave={saveUser} user={users.find((user) => user.id === actionDialog.user.id) ?? actionDialog.user} />}
+      {profileUser && <Suspense fallback={<div className="user-profile-loading-backdrop" role="status">Opening user profile…</div>}><UserProfileModal key={profileUser.id} user={users.find((user) => user.id === profileUser.id) ?? profileUser} onClose={closeProfile} onUserUpdate={updateProfileUser} /></Suspense>}
+    </section>
   )
 }

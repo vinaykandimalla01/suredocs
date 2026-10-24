@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
 import re
+import tomllib
 import uuid
 import zipfile
+import xml.etree.ElementTree as ElementTree
+from email import policy as email_policy
+from email.parser import BytesParser
 from io import BytesIO
 from pathlib import PurePosixPath
 from typing import Any
@@ -60,9 +65,12 @@ from app.services.document_access import (
     permission_for,
     record_audit,
     require_access,
+    require_edit,
     require_owner,
     utc_now,
 )
+from app.services.antivirus import MalwareDetectedError, ScannerUnavailableError, scan_document_bytes
+from app.services.notifications import add_notification
 from app.services.s3_storage import (
     StorageUnavailableError,
     delete_document_object,
@@ -97,10 +105,97 @@ _FILE_TYPES = {
     ".txt": ("text/plain", "txt"),
     ".log": ("text/plain", "log"),
     ".csv": ("text/csv", "csv"),
+    ".adoc": ("text/plain", "adoc"),
+    ".drawio": ("application/xml", "drawio"),
+    ".eml": ("message/rfc822", "eml"),
+    ".epub": ("application/epub+zip", "epub"),
+    ".html": ("text/html", "html"),
+    ".ics": ("text/calendar", "ics"),
+    ".ini": ("text/plain", "ini"),
+    ".jsonl": ("application/x-ndjson", "jsonl"),
+    ".md": ("text/markdown", "md"),
+    ".mmd": ("text/plain", "mmd"),
+    ".ndjson": ("application/x-ndjson", "ndjson"),
+    ".org": ("text/plain", "org"),
+    ".properties": ("text/plain", "properties"),
+    ".proto": ("text/plain", "proto"),
+    ".rst": ("text/plain", "rst"),
+    ".rtf": ("application/rtf", "rtf"),
+    ".sql": ("application/sql", "sql"),
+    ".svg": ("image/svg+xml", "svg"),
+    ".tex": ("application/x-tex", "tex"),
+    ".toml": ("application/toml", "toml"),
+    ".tsv": ("text/tab-separated-values", "tsv"),
+    ".xml": ("application/xml", "xml"),
+    ".xsd": ("application/xml", "xsd"),
+    ".yaml": ("application/yaml", "yaml"),
 }
 
 _CLASSIFICATIONS = {"INTERNAL", "CONFIDENTIAL", "RESTRICTED"}
 _OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_TEXT_FORMATS = {
+    ".adoc", ".html", ".ics", ".ini", ".md", ".mmd", ".org",
+    ".properties", ".proto", ".rst", ".sql", ".tex", ".toml", ".tsv",
+    ".yaml",
+}
+_JSON_LINES_FORMATS = {".jsonl", ".ndjson"}
+_XML_FORMATS = {".drawio", ".svg", ".xml", ".xsd"}
+_CONTENT_TYPE_ALIASES = {
+    ".adoc": {"text/asciidoc"},
+    ".drawio": {"application/vnd.jgraph.mxfile", "text/xml"},
+    ".eml": {"text/plain"},
+    ".epub": {"application/zip"},
+    ".ics": {"text/plain"},
+    ".jsonl": {"application/json", "application/ndjson", "text/plain"},
+    ".md": {"text/plain"},
+    ".ndjson": {"application/json", "application/ndjson", "text/plain"},
+    ".rtf": {"text/rtf"},
+    ".svg": {"application/xml", "text/xml"},
+    ".tex": {"text/plain"},
+    ".toml": {"application/x-toml", "text/plain"},
+    ".tsv": {"text/plain"},
+    ".xml": {"text/xml"},
+    ".xsd": {"text/xml"},
+    ".yaml": {"application/x-yaml", "text/yaml", "text/plain"},
+}
+
+
+def _decode_utf8(content: bytes) -> str | None:
+    try:
+        return content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+
+
+def _valid_xml(content: bytes, *, expected_root: str | None = None) -> bool:
+    if re.search(br"<!DOCTYPE|<!ENTITY", content, flags=re.IGNORECASE):
+        return False
+    try:
+        root = ElementTree.fromstring(content)
+    except ElementTree.ParseError:
+        return False
+    local_name = root.tag.rsplit("}", 1)[-1].lower() if isinstance(root.tag, str) else ""
+    return expected_root is None or local_name == expected_root
+
+
+def _valid_epub(content: bytes) -> bool:
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            names = archive.namelist()
+            if not names or names[0] != "mimetype" or "META-INF/container.xml" not in names:
+                return False
+            mimetype = archive.getinfo("mimetype")
+            container = archive.getinfo("META-INF/container.xml")
+            if mimetype.compress_type != zipfile.ZIP_STORED or mimetype.file_size > 64:
+                return False
+            if container.file_size > 2 * 1024 * 1024:
+                return False
+            return (
+                archive.read("mimetype") == b"application/epub+zip"
+                and _valid_xml(archive.read("META-INF/container.xml"))
+            )
+    except (OSError, ValueError, zipfile.BadZipFile, KeyError):
+        return False
 
 
 def _safe_filename(filename: str | None) -> str:
@@ -126,7 +221,12 @@ def _validate_content(filename: str, content_type: str | None, content: bytes) -
         )
     expected_type, extension = expected
     declared = (content_type or "").split(";", 1)[0].strip().lower()
-    if declared and declared not in {expected_type, "application/octet-stream"}:
+    accepted_types = {
+        expected_type,
+        "application/octet-stream",
+        *_CONTENT_TYPE_ALIASES.get(suffix, set()),
+    }
+    if declared and declared not in accepted_types:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="The file content type does not match its extension.",
@@ -140,12 +240,45 @@ def _validate_content(filename: str, content_type: str | None, content: bytes) -
         ".xls": content.startswith(_OLE_SIGNATURE),
         ".ppt": content.startswith(_OLE_SIGNATURE),
     }
-    if suffix in {".json", ".txt", ".log", ".csv"}:
+    if suffix in {".json", ".txt", ".log", ".csv"} | _TEXT_FORMATS:
+        decoded = _decode_utf8(content)
+        matches_signature = decoded is not None
+        if matches_signature and suffix == ".toml":
+            try:
+                tomllib.loads(decoded)
+            except tomllib.TOMLDecodeError:
+                matches_signature = False
+        elif matches_signature and suffix == ".ics":
+            normalized = decoded.upper()
+            matches_signature = (
+                "BEGIN:VCALENDAR" in normalized
+                and "END:VCALENDAR" in normalized
+            )
+    elif suffix in _JSON_LINES_FORMATS:
+        decoded = _decode_utf8(content)
         try:
-            content.decode("utf-8-sig")
-            matches_signature = True
-        except UnicodeDecodeError:
+            if decoded is None:
+                matches_signature = False
+            else:
+                rows = [line for line in decoded.splitlines() if line.strip()]
+                matches_signature = bool(rows)
+                for line in rows:
+                    json.loads(line)
+        except (json.JSONDecodeError, TypeError):
             matches_signature = False
+    elif suffix == ".eml":
+        try:
+            message = BytesParser(policy=email_policy.default).parsebytes(content)
+            matches_signature = bool(message.keys())
+        except (ValueError, UnicodeError):
+            matches_signature = False
+    elif suffix == ".rtf":
+        matches_signature = content.lstrip().startswith(b"{\\rtf")
+    elif suffix == ".epub":
+        matches_signature = _valid_epub(content)
+    elif suffix in _XML_FORMATS:
+        expected_root = "svg" if suffix == ".svg" else None
+        matches_signature = _valid_xml(content, expected_root=expected_root)
     elif suffix in {".docx", ".xlsx", ".pptx"}:
         try:
             with zipfile.ZipFile(BytesIO(content)) as archive:
@@ -199,6 +332,7 @@ def _document_response(
     has_download = is_owner or bool(
         grant and grant.is_effective and grant.can_download
     )
+    has_edit = is_owner or bool(grant and grant.is_effective and grant.can_edit)
     count = None
     if registry:
         count = db.scalar(
@@ -206,11 +340,26 @@ def _document_response(
             .select_from(DocumentPermission)
             .where(DocumentPermission.document_id == document.id)
         ) or 0
+    permission_grantor = (
+        db.get(User, grant.granted_by_user_id)
+        if grant is not None and not is_owner
+        else None
+    )
     return DocumentResponse(
         id=document.id,
         owner_user_id=document.owner_user_id,
         owner_name=owner.full_name,
         owner_email=owner.email,
+        owner_role=owner.role.value,
+        owner_department=owner.department,
+        permission_granted_at=grant.granted_at if grant and not is_owner else None,
+        permission_expires_at=grant.expires_at if grant and not is_owner else None,
+        permission_granted_by_name=(
+            permission_grantor.full_name if permission_grantor else None
+        ),
+        permission_granted_by_email=(
+            permission_grantor.email if permission_grantor else None
+        ),
         created_by_user_id=document.created_by_user_id,
         title=document.title,
         original_filename=version.original_filename if version else None,
@@ -230,6 +379,7 @@ def _document_response(
         deleted_at=document.deleted_at,
         can_view=has_view,
         can_download=has_download,
+        can_edit=has_edit,
         is_owner=is_owner,
         permission_count=count,
     )
@@ -257,8 +407,27 @@ def _owner_document(
     document_id: uuid.UUID,
     user: User,
     operation: str,
+    forbidden_for_existing_document: bool = False,
 ) -> Document:
     return require_owner(
+        db,
+        request,
+        get_document(db, document_id, for_update=True),
+        user,
+        operation,
+        requested_id=document_id,
+        forbidden_for_existing_document=forbidden_for_existing_document,
+    )
+
+
+def _editable_document(
+    db: Session,
+    request: Request,
+    document_id: uuid.UUID,
+    user: User,
+    operation: str,
+) -> Document:
+    return require_edit(
         db,
         request,
         get_document(db, document_id, for_update=True),
@@ -319,6 +488,60 @@ def _upload_failure(
     db.commit()
 
 
+async def _scan_and_publish_version(
+    db: Session,
+    request: Request,
+    document: Document,
+    version: DocumentVersion,
+    user: User,
+    content: bytes,
+) -> str:
+    """Publish only a clean version; leave unavailable scans pending."""
+    try:
+        await run_in_threadpool(scan_document_bytes, content)
+    except ScannerUnavailableError:
+        return "PENDING_SCAN"
+    except MalwareDetectedError:
+        version.status = "QUARANTINED"
+        verdict = "infected"
+        result = "FAILED"
+    else:
+        version.status = "AVAILABLE"
+        version.scan_completed_at = utc_now()
+        current_version = (
+            db.get(DocumentVersion, document.current_version_id)
+            if document.current_version_id is not None
+            else None
+        )
+        if current_version is None or current_version.version_number < version.version_number:
+            document.current_version_id = version.id
+        verdict = "clean"
+        result = "SUCCESS"
+
+    if version.status == "QUARANTINED":
+        version.scan_completed_at = utc_now()
+    record_audit(
+        db,
+        request,
+        actor_user_id=user.id,
+        action_type="DOCUMENT_SCAN_COMPLETED",
+        result=result,
+        document=document,
+        details={
+            "version_id": str(version.id),
+            "version_number": str(version.version_number),
+            "verdict": verdict,
+        },
+    )
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Could not persist document scan result for version %s", version.id)
+        return "PENDING_SCAN"
+    return version.status
+
+
 def _response_stream(s3_object: dict[str, Any], on_error=None):
     body = s3_object["Body"]
 
@@ -344,6 +567,19 @@ def _verify_object_size(
         raise StorageUnavailableError(
             "The stored file does not match its verified metadata."
         )
+    checksum = s3_object.get("Metadata", {}).get("sha256")
+    expected_checksum = base64.b64encode(bytes.fromhex(version.checksum_sha256)).decode("ascii")
+    if checksum is not None and checksum != expected_checksum:
+        s3_object["Body"].close()
+        raise StorageUnavailableError(
+            "The stored file checksum does not match its verified metadata."
+        )
+    s3_checksum = s3_object.get("ChecksumSHA256")
+    if s3_checksum is not None and s3_checksum != expected_checksum:
+        s3_object["Body"].close()
+        raise StorageUnavailableError(
+            "The stored file checksum does not match its verified metadata."
+        )
 
 
 def _file_response(
@@ -365,7 +601,15 @@ def _file_response(
         "Cache-Control": "private, no-store",
     }
     if inline:
-        headers["Content-Security-Policy"] = "sandbox"
+        if version.content_type in {"text/html", "image/svg+xml"}:
+            headers["Content-Security-Policy"] = (
+                "sandbox; default-src 'none'; style-src 'unsafe-inline'; "
+                "object-src 'none'; base-uri 'none'; form-action 'none'; "
+                "connect-src 'none'; frame-src 'none'; img-src 'none'; "
+                "font-src 'none'; media-src 'none'"
+            )
+        else:
+            headers["Content-Security-Policy"] = "sandbox"
     return StreamingResponse(
         _response_stream(s3_object, on_error=on_stream_error),
         media_type=version.content_type,
@@ -423,11 +667,13 @@ def _load_accessible_version(
 )
 async def upload_document(
     request: Request,
+    response: Response,
     file: UploadFile = File(...),
     title: str | None = Form(default=None, max_length=255),
     description: str | None = Form(default=None, max_length=10000),
     category: str | None = Form(default=None, max_length=80),
     classification: str = Form(default="CONFIDENTIAL"),
+    tags: list[str] | None = Form(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DocumentResponse:
@@ -446,6 +692,27 @@ async def upload_document(
         )
         db.commit()
         raise
+    normalized_tags = []
+    tag_error = len(tags or []) > 50
+    for tag in tags or []:
+        normalized = " ".join(tag.split())
+        if len(normalized) > 80:
+            tag_error = True
+            break
+        if normalized and normalized.casefold() not in {item.casefold() for item in normalized_tags}:
+            normalized_tags.append(normalized)
+    if tag_error:
+        record_audit(
+            db,
+            request,
+            actor_user_id=current_user.id,
+            action_type="UPLOAD_REJECTED",
+            result="DENIED",
+            document_id=document_id,
+            details={"http_status": 422, "reason": "invalid_tags"},
+        )
+        db.commit()
+        raise HTTPException(status_code=422, detail="Tags must be 80 characters or fewer, with at most 50 tags.")
     normalized_classification = classification.upper()
     if normalized_classification not in _CLASSIFICATIONS:
         record_audit(
@@ -469,7 +736,7 @@ async def upload_document(
         classification=normalized_classification,
         department=current_user.department,
         status="ACTIVE",
-        custom_metadata={},
+        custom_metadata={"tags": normalized_tags},
     )
     if not document.title:
         record_audit(
@@ -522,9 +789,8 @@ async def upload_document(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
-        version.status = "AVAILABLE"
+        version.status = "PENDING_SCAN"
         version.s3_version_id = s3_version_id
-        document.current_version_id = version.id
         document.updated_at = utc_now()
         record_audit(
             db,
@@ -533,7 +799,11 @@ async def upload_document(
             action_type="DOCUMENT_UPLOADED",
             result="SUCCESS",
             document=document,
-            details={"version_id": str(version.id), "version_number": 1},
+            details={
+                "version_id": str(version.id),
+                "version_number": 1,
+                "scan_status": "PENDING_SCAN",
+            },
         )
         db.commit()
     except SQLAlchemyError as exc:
@@ -573,8 +843,23 @@ async def upload_document(
             status_code=503,
             detail="The upload could not be finalized. Please retry.",
         ) from exc
+    version_status = await _scan_and_publish_version(
+        db,
+        request,
+        document,
+        version,
+        current_user,
+        content,
+    )
+    if version_status != "AVAILABLE":
+        response.status_code = status.HTTP_202_ACCEPTED
     db.refresh(document)
-    return _document_response(db, document, current_user)
+    db.expire(document, ["current_version"])
+    db.refresh(version)
+    document_response = _document_response(db, document, current_user)
+    document_response.latest_uploaded_version_number = version.version_number
+    document_response.latest_uploaded_version_status = version_status
+    return document_response
 
 
 @router.get("/my", response_model=DocumentListResponse)
@@ -881,7 +1166,7 @@ async def view_document(
             status_code=503,
             detail="The document file is temporarily unavailable.",
         ) from exc
-    view_event = record_audit(
+    record_audit(
         db,
         request,
         actor_user_id=current_user.id,
@@ -895,14 +1180,19 @@ async def view_document(
     def mark_stream_failure(exc: Exception) -> None:
         logger.error("Document preview stream failed (%s)", type(exc).__name__)
         try:
-            event = db.get(DocumentAuditLog, view_event.id)
-            if event is not None:
-                event.result = "FAILED"
-                event.details = {
-                    **event.details,
+            record_audit(
+                db,
+                request,
+                actor_user_id=current_user.id,
+                action_type="DOCUMENT_VIEWED",
+                result="FAILED",
+                document=document,
+                details={
+                    "version_id": str(version.id),
                     "reason": "stream_interrupted",
-                }
-                db.commit()
+                },
+            )
+            db.commit()
         except Exception as audit_error:
             logger.error(
                 "Document preview stream failure could not be audited (%s)",
@@ -1008,7 +1298,7 @@ async def update_document_metadata(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DocumentResponse:
-    document = _owner_document(db, request, document_id, current_user, "edit")
+    document = _editable_document(db, request, document_id, current_user, "edit_metadata")
     changes = body.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="No metadata changes provided.")
@@ -1042,11 +1332,12 @@ async def update_document_metadata(
 async def replace_document_file(
     document_id: uuid.UUID,
     request: Request,
+    response: Response,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DocumentResponse:
-    document = _owner_document(
+    document = _editable_document(
         db,
         request,
         document_id,
@@ -1101,9 +1392,8 @@ async def replace_document_file(
         _upload_failure(db, request, document, version, current_user)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
-        version.status = "AVAILABLE"
+        version.status = "PENDING_SCAN"
         version.s3_version_id = s3_version_id
-        document.current_version_id = version.id
         document.updated_at = utc_now()
         record_audit(
             db,
@@ -1115,6 +1405,7 @@ async def replace_document_file(
             details={
                 "version_id": str(version.id),
                 "version_number": version.version_number,
+                "status": version.status,
             },
         )
         db.commit()
@@ -1159,8 +1450,23 @@ async def replace_document_file(
             status_code=503,
             detail="The replacement could not be finalized. Please retry.",
         ) from exc
+    version_status = await _scan_and_publish_version(
+        db,
+        request,
+        document,
+        version,
+        current_user,
+        content,
+    )
+    if version_status != "AVAILABLE":
+        response.status_code = status.HTTP_202_ACCEPTED
     db.refresh(document)
-    return _document_response(db, document, current_user)
+    db.expire(document, ["current_version"])
+    db.refresh(version)
+    document_response = _document_response(db, document, current_user)
+    document_response.latest_uploaded_version_number = version.version_number
+    document_response.latest_uploaded_version_status = version_status
+    return document_response
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1170,7 +1476,14 @@ async def delete_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
-    document = _owner_document(db, request, document_id, current_user, "delete")
+    document = _owner_document(
+        db,
+        request,
+        document_id,
+        current_user,
+        "delete",
+        forbidden_for_existing_document=True,
+    )
     document.status = "DELETED"
     document.deleted_at = utc_now()
     document.deleted_by_user_id = current_user.id
@@ -1220,8 +1533,13 @@ async def list_document_permissions(
                 user_id=permission.user_id,
                 user_name=user.full_name,
                 user_email=user.email,
+                user_role=user.role.value,
+                user_department=user.department,
+                user_job_title=user.job_title,
+                user_account_status=user.account_status.value,
                 can_view=permission.can_view,
                 can_download=permission.can_download,
+                can_edit=permission.can_edit,
                 granted_by_user_id=permission.granted_by_user_id,
                 granted_by_name=granted_by.full_name,
                 granted_at=permission.granted_at,
@@ -1270,6 +1588,7 @@ async def grant_document_permission(
             user_id=recipient.id,
             can_view=body.can_view,
             can_download=body.can_download,
+            can_edit=body.can_edit,
             granted_by_user_id=current_user.id,
             granted_at=now,
             expires_at=body.expires_at,
@@ -1278,6 +1597,7 @@ async def grant_document_permission(
     else:
         grant.can_view = body.can_view
         grant.can_download = body.can_download
+        grant.can_edit = body.can_edit
         grant.granted_by_user_id = current_user.id
         grant.granted_at = now
         grant.expires_at = body.expires_at
@@ -1295,8 +1615,20 @@ async def grant_document_permission(
         details={
             "can_view": body.can_view,
             "can_download": body.can_download,
+            "can_edit": body.can_edit,
             "expires_at": body.expires_at.isoformat() if body.expires_at else None,
         },
+    )
+    add_notification(
+        db,
+        recipient_user_id=recipient.id,
+        actor_user_id=current_user.id,
+        notification_type="ACCESS_GRANTED",
+        title="Document access granted",
+        message=f"{current_user.full_name} shared {document.title} with you.",
+        preference_key="access_granted",
+        document_id=document.id,
+        metadata={"permission_id": str(grant.id)},
     )
     db.commit()
     db.refresh(grant)
@@ -1305,8 +1637,13 @@ async def grant_document_permission(
         user_id=grant.user_id,
         user_name=recipient.full_name,
         user_email=recipient.email,
+        user_role=recipient.role.value,
+        user_department=recipient.department,
+        user_job_title=recipient.job_title,
+        user_account_status=recipient.account_status.value,
         can_view=grant.can_view,
         can_download=grant.can_download,
+        can_edit=grant.can_edit,
         granted_by_user_id=grant.granted_by_user_id,
         granted_by_name=current_user.full_name,
         granted_at=grant.granted_at,
@@ -1352,6 +1689,17 @@ async def revoke_document_permission(
             target_user_id=grant.user_id,
             details={"permission_id": str(grant.id)},
         )
+        add_notification(
+            db,
+            recipient_user_id=grant.user_id,
+            actor_user_id=current_user.id,
+            notification_type="ACCESS_REVOKED",
+            title="Document access revoked",
+            message=f"Access to {document.title} was revoked.",
+            preference_key="access_revoked",
+            document_id=document.id,
+            metadata={"permission_id": str(grant.id)},
+        )
         db.commit()
 
 
@@ -1365,12 +1713,13 @@ async def list_document_audit(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DocumentAuditListResponse:
-    document = _owner_document(
+    document = require_access(
         db,
         request,
-        document_id,
+        get_document(db, document_id),
         current_user,
-        "list_audit",
+        "view",
+        requested_id=document_id,
     )
     actor = aliased(User)
     target = aliased(User)
@@ -1389,6 +1738,7 @@ async def list_document_audit(
                 document_id_snapshot=event.document_id_snapshot,
                 actor_user_id=event.actor_user_id,
                 actor_name=actor_user.full_name if actor_user else None,
+                actor_department=actor_user.department if actor_user else None,
                 target_user_id=event.target_user_id,
                 target_name=target_user.full_name if target_user else None,
                 action_type=event.action_type,

@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 
 class UserRole(str, enum.Enum):
     ADMIN = "ADMIN"
+    MANAGER = "MANAGER"
     EMPLOYEE = "EMPLOYEE"
 
 
@@ -113,6 +114,10 @@ class User(Base):
 
     job_title: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    bio: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
     failed_login_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0",
     )
@@ -182,6 +187,10 @@ class User(Base):
         CheckConstraint(
             "failed_login_attempts >= 0",
             name="ck_users_failed_login_nonneg",
+        ),
+        CheckConstraint(
+            "role IN ('ADMIN', 'MANAGER', 'EMPLOYEE')",
+            name="ck_users_role",
         ),
     )
 

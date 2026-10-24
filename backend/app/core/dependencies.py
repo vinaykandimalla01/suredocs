@@ -122,7 +122,7 @@ async def require_employee(
     user: User = Depends(get_current_user),
 ) -> User:
     """Require the authenticated user to have EMPLOYEE role."""
-    if user.role != UserRole.EMPLOYEE:
+    if user.role not in {UserRole.EMPLOYEE, UserRole.MANAGER}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Employee access required",

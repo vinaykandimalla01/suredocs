@@ -28,6 +28,7 @@ class LoginRequest(BaseModel):
         max_length=PASSWORD_MAX_LENGTH,
         description="Account password",
     )
+    totp_code: str | None = Field(default=None, min_length=6, max_length=8)
 
     @field_validator("email")
     @classmethod
@@ -42,6 +43,15 @@ class LoginRequest(BaseModel):
             ).normalized
         except EmailNotValidError as exc:
             raise ValueError("Enter a valid email address.") from exc
+
+    @field_validator("totp_code")
+    @classmethod
+    def validate_totp_code(cls, value: str | None) -> str | None:
+        if value is not None:
+            value = value.strip()
+            if not value.isdigit():
+                raise ValueError("Authenticator code must contain digits only.")
+        return value
 
 
 # ---------------------------------------------------------------------------

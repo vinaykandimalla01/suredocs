@@ -42,11 +42,14 @@ class PermissionGrantRequest(BaseModel):
     user_id: uuid.UUID
     can_view: bool
     can_download: bool
+    can_edit: bool = False
     expires_at: datetime | None = None
 
     @model_validator(mode="after")
     def download_requires_view(self) -> "PermissionGrantRequest":
         if self.can_download and not self.can_view:
+            self.can_view = True
+        if self.can_edit:
             self.can_view = True
         if not self.can_view and not self.can_download:
             raise ValueError("A permission must allow viewing or downloading.")
@@ -80,8 +83,13 @@ class DocumentPermissionResponse(BaseModel):
     user_id: uuid.UUID
     user_name: str
     user_email: str
+    user_role: str | None = None
+    user_department: str | None = None
+    user_job_title: str | None = None
+    user_account_status: str
     can_view: bool
     can_download: bool
+    can_edit: bool = False
     granted_by_user_id: uuid.UUID
     granted_by_name: str
     granted_at: datetime
@@ -96,6 +104,12 @@ class DocumentResponse(BaseModel):
     owner_user_id: uuid.UUID
     owner_name: str
     owner_email: str
+    owner_role: str | None = None
+    owner_department: str | None = None
+    permission_granted_at: datetime | None = None
+    permission_expires_at: datetime | None = None
+    permission_granted_by_name: str | None = None
+    permission_granted_by_email: str | None = None
     created_by_user_id: uuid.UUID
     title: str
     original_filename: str | None
@@ -107,6 +121,8 @@ class DocumentResponse(BaseModel):
     custom_metadata: dict
     current_version_id: uuid.UUID | None
     current_version_number: int | None
+    latest_uploaded_version_number: int | None = None
+    latest_uploaded_version_status: str | None = None
     content_type: str | None
     size_bytes: int | None
     checksum_sha256: str | None
@@ -115,6 +131,7 @@ class DocumentResponse(BaseModel):
     deleted_at: datetime | None
     can_view: bool
     can_download: bool
+    can_edit: bool = False
     is_owner: bool
     permission_count: int | None = None
 
@@ -147,6 +164,7 @@ class DocumentAuditResponse(BaseModel):
     document_id_snapshot: uuid.UUID
     actor_user_id: uuid.UUID | None
     actor_name: str | None
+    actor_department: str | None = None
     target_user_id: uuid.UUID | None
     target_name: str | None
     action_type: str

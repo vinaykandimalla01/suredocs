@@ -120,9 +120,13 @@ export async function apiPut(path, body, { signal } = {}) {
   return data
 }
 
-export async function apiDelete(path, { signal } = {}) {
+export async function apiDelete(path, { body, signal } = {}) {
   const response = await fetchApi(path, {
     method: 'DELETE',
+    ...(body === undefined ? {} : {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
     credentials: 'include',
     signal,
   })

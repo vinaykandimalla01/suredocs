@@ -62,12 +62,31 @@ services:
       db:
         condition: service_healthy
 
+  clamav:
+    build:
+      context: ./backend/clamav
+    image: suredocs-clamav:1.5.4
+    restart: unless-stopped
+    stop_grace_period: 1m
+
+    ports:
+      - "127.0.0.1:3310:3310"
+
+    volumes:
+      - clamav_data:/var/lib/clamav
+
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   postgres_data:
     name: suredocs_postgres18_data
 
   pgadmin_data:
     name: suredocs_pgadmin_data
+
+  clamav_data:
+    name: suredocs_clamav_data
 
 secrets:
   postgres_password:

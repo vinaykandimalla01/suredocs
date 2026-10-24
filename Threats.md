@@ -59,3 +59,23 @@ These tests provide evidence for the authentication role checks. Separate docume
 7. Run the existing authentication tests and new document-authorization integration tests, recording their actual results.
 
 The threat should be considered adequately mitigated only after both role-based authorization and document-level access enforcement have been verified.
+
+
+
+## T-03 — PostgreSQL Transaction Lock Causing Reconciliation Failure
+
+**Threat:** A long-running or abandoned PostgreSQL transaction holds a database lock, preventing SureDocs from committing document ownership and permission reconciliation changes.
+
+**Attack scenario:** A SureDocs operation leaves a PostgreSQL transaction idle in the `idle in transaction` state for more than six minutes while holding a lock on a user row. A subsequent reconciliation operation requires that row to satisfy a document ownership foreign-key constraint and becomes blocked from completing its transaction.
+
+**Potential impact:** Failed reconciliation, delayed document-sharing updates, database resource contention, and inconsistent application state if recovery procedures are implemented incorrectly. Premature termination of unrelated database sessions could interrupt other operations.
+
+**Existing mitigation:** The investigation identified PostgreSQL diagnostic queries using `pg_stat_activity` and `pg_blocking_pids()` to identify blocking sessions, transaction age, session state, and the associated query. The recovery procedure prioritizes identifying the exact blocker and distinguishing abandoned SureDocs transactions from unrelated active sessions before taking corrective action.
+
+**Automated test evidence:** No automated test results have been provided confirming the lock-recovery behavior. Verification should include tests for transaction rollback, foreign-key integrity, reconciliation retries, and duplicate prevention.
+
+**Current status:** Under investigation — the reconciliation dry run passed, but the actual transaction was blocked by an existing PostgreSQL transaction. Successful lock release and reconciliation commit have not yet been confirmed.
+
+**Remaining limitation:** Diagnostic queries identify blocking relationships but do not, by themselves, establish whether a transaction is safe to terminate. The recovery process must verify session ownership and ensure that uncommitted changes are handled appropriately. The reconciliation must also remain safe to retry without duplicating permission grants or changing unrelated ownership records.
+
+**Further verification:** Identify the blocking session and determine whether it belongs to an abandoned SureDocs operation. Release the lock through a controlled rollback or authorized session termination only when safe. Retry the reconciliation and verify that the transaction commits successfully, document ownership foreign keys remain valid, and permission counts match the expected distribution. Confirm that no unrelated sessions were terminated and no duplicate or partially applied changes remain.

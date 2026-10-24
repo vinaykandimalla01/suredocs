@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiDelete, apiGet, apiPatch, apiPut, apiUpload } from './api.js'
 import DocumentViewer from './DocumentViewer.jsx'
+import EmployeeUploadWorkspace from './EmployeeUploadWorkspace.jsx'
+import MyDocumentsWorkspace, { SharedWithMeWorkspace } from './MyDocumentsWorkspace.jsx'
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024
 const ACCEPTED_EXTENSIONS = new Set([
@@ -360,7 +362,7 @@ function DocumentAuditHistory({ document }) {
   )
 }
 
-export default function DocumentsWorkspace({
+function LegacyDocumentsWorkspace({
   user,
   mode = 'owned',
   initialDocumentId = null,
@@ -635,4 +637,17 @@ export default function DocumentsWorkspace({
       )}
     </>
   )
+}
+
+export default function DocumentsWorkspace(props) {
+  if (props.mode === 'shared') {
+    return <SharedWithMeWorkspace initialDocumentId={props.initialDocumentId} onSearchChange={props.onSearchChange} search={props.search} user={props.user} />
+  }
+  if (props.mode === 'owned' && !props.startInUpload) {
+    return <MyDocumentsWorkspace initialDocumentId={props.initialDocumentId} onSearchChange={props.onSearchChange} search={props.search} user={props.user} />
+  }
+  if (props.mode === 'owned' && props.startInUpload) {
+    return <EmployeeUploadWorkspace user={props.user} />
+  }
+  return <LegacyDocumentsWorkspace {...props} />
 }

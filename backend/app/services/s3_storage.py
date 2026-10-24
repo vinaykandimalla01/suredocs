@@ -29,17 +29,55 @@ def put_document(
     content_type: str,
     checksum_sha256: str,
 ) -> str | None:
-    """Store bytes in the configured private bucket and return S3's version ID."""
+    """Store bytes privately and verify the stored object before finalization."""
     try:
-        result = get_s3_client().put_object(
+        client = get_s3_client()
+        expected_length = None
+        if hasattr(body, "getbuffer"):
+            expected_length = body.getbuffer().nbytes
+        elif getattr(body, "seekable", lambda: False)():
+            position = body.tell()
+            body.seek(0, 2)
+            expected_length = body.tell() - position
+            body.seek(position)
+        result = client.put_object(
             Bucket=S3_BUCKET,
             Key=key,
             Body=body,
             ContentType=content_type,
             Metadata={"sha256": checksum_sha256},
+            ChecksumSHA256=checksum_sha256,
             ServerSideEncryption="AES256",
         )
-        return result.get("VersionId")
+        version_id = result.get("VersionId")
+        head_arguments = {"Bucket": S3_BUCKET, "Key": key, "ChecksumMode": "ENABLED"}
+        if version_id:
+            head_arguments["VersionId"] = version_id
+        try:
+            stored = client.head_object(**head_arguments)
+            if expected_length is not None and stored.get("ContentLength") != expected_length:
+                raise StorageUnavailableError("Stored object size verification failed.")
+            if stored.get("Metadata", {}).get("sha256") != checksum_sha256:
+                raise StorageUnavailableError("Stored object checksum metadata verification failed.")
+            if stored.get("ChecksumSHA256") and stored["ChecksumSHA256"] != checksum_sha256:
+                raise StorageUnavailableError("Stored object checksum verification failed.")
+        except Exception as exc:
+            cleanup_arguments = {"Bucket": S3_BUCKET, "Key": key}
+            if version_id:
+                cleanup_arguments["VersionId"] = version_id
+            try:
+                client.delete_object(**cleanup_arguments)
+            except (BotoCoreError, ClientError, NoCredentialsError) as cleanup_exc:
+                logger.error("S3 verification cleanup failed (%s)", type(cleanup_exc).__name__)
+            if isinstance(exc, StorageUnavailableError):
+                raise
+            if isinstance(exc, (BotoCoreError, ClientError, NoCredentialsError)):
+                logger.error("S3 document verification failed (%s)", type(exc).__name__)
+                raise StorageUnavailableError(
+                    "Document storage verification failed. The upload was not completed."
+                ) from exc
+            raise
+        return version_id
     except (BotoCoreError, ClientError, NoCredentialsError) as exc:
         logger.error("S3 document upload failed (%s)", type(exc).__name__)
         raise StorageUnavailableError(

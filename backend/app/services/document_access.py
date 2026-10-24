@@ -11,9 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.documents import Document, DocumentAuditLog, DocumentPermission
-from app.models.user import User
+from app.models.user import AccountStatus, User
 
-DocumentAction = Literal["view", "download"]
+DocumentAction = Literal[
+    "view", "download", "edit", "delete", "share", "manage_permissions",
+]
 
 
 def get_document(
@@ -51,14 +53,89 @@ def can_access(
     user: User,
     action: DocumentAction,
 ) -> bool:
-    if document.status != "ACTIVE" or document.deleted_at is not None:
+    return can_perform_document_action(db, document, user, action)
+
+
+def _document_is_active(document: Document, user: User) -> bool:
+    return (
+        user.account_status == AccountStatus.ACTIVE
+        and document.status == "ACTIVE"
+        and document.deleted_at is None
+    )
+
+
+def _active_grant(
+    db: Session,
+    document: Document,
+    user: User,
+) -> DocumentPermission | None:
+    grant = permission_for(db, document.id, user.id)
+    if grant is None or not grant.is_effective:
+        return None
+    return grant
+
+
+def can_view_document(db: Session, document: Document, user: User) -> bool:
+    if not _document_is_active(document, user):
         return False
     if document.owner_user_id == user.id:
         return True
-    grant = permission_for(db, document.id, user.id)
-    if grant is None or not grant.is_effective:
+    grant = _active_grant(db, document, user)
+    return bool(grant and grant.can_view)
+
+
+def can_download_document(db: Session, document: Document, user: User) -> bool:
+    if not _document_is_active(document, user):
         return False
-    return grant.can_view if action == "view" else grant.can_download
+    if document.owner_user_id == user.id:
+        return True
+    grant = _active_grant(db, document, user)
+    return bool(grant and grant.can_download)
+
+
+def can_edit_document(db: Session, document: Document, user: User) -> bool:
+    if not _document_is_active(document, user):
+        return False
+    if document.owner_user_id == user.id:
+        return True
+    grant = _active_grant(db, document, user)
+    return bool(grant and grant.can_edit)
+
+
+def can_delete_document(document: Document, user: User) -> bool:
+    return _document_is_active(document, user) and document.owner_user_id == user.id
+
+
+def can_share_document(db: Session, document: Document, user: User) -> bool:
+    # Delegated sharing is not part of the current product contract.
+    return can_manage_document_permissions(db, document, user)
+
+
+def can_manage_document_permissions(
+    db: Session,
+    document: Document,
+    user: User,
+) -> bool:
+    return _document_is_active(document, user) and document.owner_user_id == user.id
+
+
+def can_perform_document_action(
+    db: Session,
+    document: Document,
+    user: User,
+    action: DocumentAction,
+) -> bool:
+    if action == "view":
+        return can_view_document(db, document, user)
+    if action == "download":
+        return can_download_document(db, document, user)
+    if action == "edit":
+        return can_edit_document(db, document, user)
+    if action == "delete":
+        return can_delete_document(document, user)
+    if action == "share":
+        return can_share_document(db, document, user)
+    return can_manage_document_permissions(db, document, user)
 
 
 def record_audit(
@@ -107,7 +184,7 @@ def require_access(
     action: DocumentAction,
     requested_id: uuid.UUID | None = None,
 ) -> Document:
-    if document is None or not can_access(db, document, user, action):
+    if document is None or not can_perform_document_action(db, document, user, action):
         record_audit(
             db,
             request,
@@ -133,9 +210,11 @@ def require_owner(
     user: User,
     operation: str,
     requested_id: uuid.UUID | None = None,
+    forbidden_for_existing_document: bool = False,
 ) -> Document:
     if (
         document is None
+        or user.account_status != AccountStatus.ACTIVE
         or document.owner_user_id != user.id
         or document.status != "ACTIVE"
         or document.deleted_at is not None
@@ -152,10 +231,27 @@ def require_owner(
         )
         db.commit()
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+                if document is not None and forbidden_for_existing_document
+                else status.HTTP_404_NOT_FOUND
+            ),
             detail="Document not found or access denied.",
         )
     return document
+
+
+def require_edit(
+    db: Session,
+    request: Request,
+    document: Document | None,
+    user: User,
+    operation: str,
+    requested_id: uuid.UUID | None = None,
+) -> Document:
+    return require_access(
+        db, request, document, user, "edit", requested_id=requested_id,
+    )
 
 
 def utc_now() -> datetime:

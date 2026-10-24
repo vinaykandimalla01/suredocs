@@ -40,3 +40,14 @@ credentials.csv
 # Environment files
 .env
 .env.*
+
+dist
+
+.env
+.env.example
+
+.tmp-edge-employee
+.tmp-edge-employee-2
+.tmp-edge-employee-3
+.tmp-employee-chrome
+.tmp-employee-chrome-2
