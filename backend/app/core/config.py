@@ -162,7 +162,7 @@ SESSION_ABSOLUTE_TIMEOUT: int = int(os.getenv("SUREDOCS_SESSION_ABSOLUTE_TIMEOUT
 # CORS — explicitly allowed frontend origins
 # ---------------------------------------------------------------------------
 
-CORS_ORIGINS: list[str] = [
+_configured_cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "SUREDOCS_CORS_ORIGINS",
@@ -172,6 +172,14 @@ CORS_ORIGINS: list[str] = [
     ).split(",")
     if origin.strip()
 ]
+CORS_ORIGINS: list[str] = list(
+    dict.fromkeys(
+        [
+            *(["https://suredocs-one.vercel.app"] if IS_PRODUCTION else []),
+            *_configured_cors_origins,
+        ]
+    )
+)
 
 # ---------------------------------------------------------------------------
 # Login abuse protection

@@ -310,7 +310,7 @@ def test_production_rejects_localhost_database_url():
     assert "local production database rejected" in result.stdout
 
 
-def test_cors_accepts_explicit_production_and_local_origins():
+def test_cors_allows_suredocs_production_frontend_and_preserves_configured_origins():
     env = _production_environment()
     env["SESSION_SECRET"] = "s" * 48
     env["SUREDOCS_CORS_ORIGINS"] = (
@@ -321,21 +321,37 @@ def test_cors_accepts_explicit_production_and_local_origins():
         "from app.core.config import CORS_ORIGINS\n"
         "from app.main import app\n"
         "assert CORS_ORIGINS == "
-        "['https://frontend.example.test', 'http://localhost:5173']\n"
+        "['https://suredocs-one.vercel.app', "
+        "'https://frontend.example.test', 'http://localhost:5173']\n"
         "client = TestClient(app)\n"
-        "headers = {'Origin': 'https://frontend.example.test', "
-        "'Access-Control-Request-Method': 'GET'}\n"
-        "response = client.options('/api/auth/health', headers=headers)\n"
-        "assert response.headers.get('access-control-allow-origin') == headers['Origin']\n"
-        "headers['Origin'] = 'https://not-allowed.example.test'\n"
-        "response = client.options('/api/auth/health', headers=headers)\n"
-        "assert 'access-control-allow-origin' not in response.headers\n"
-        "print('explicit CORS origins accepted; unlisted origin rejected')\n",
+        "origin = 'https://suredocs-one.vercel.app'\n"
+        "preflight_headers = {\n"
+        "    'Origin': origin,\n"
+        "    'Access-Control-Request-Method': 'POST',\n"
+        "    'Access-Control-Request-Headers': 'content-type',\n"
+        "}\n"
+        "response = client.options('/api/auth/login', headers=preflight_headers)\n"
+        "assert response.status_code == 200, response.text\n"
+        "assert response.headers.get('access-control-allow-origin') == origin\n"
+        "assert response.headers.get('access-control-allow-credentials') == 'true'\n"
+        "assert 'POST' in response.headers.get('access-control-allow-methods', '')\n"
+        "assert 'content-type' in response.headers.get('access-control-allow-headers', '').lower()\n"
+        "login = client.post('/api/auth/login', headers={'Origin': origin}, json={\n"
+        "    'email': 'person@suredocs.test', 'password': 'SafeTestPassword1!'\n"
+        "})\n"
+        "assert login.status_code == 503, login.text\n"
+        "assert login.headers.get('access-control-allow-origin') == origin\n"
+        "assert login.headers.get('access-control-allow-credentials') == 'true'\n"
+        "disallowed_headers = {**preflight_headers, 'Origin': 'https://not-allowed.example.test'}\n"
+        "disallowed = client.options('/api/auth/login', headers=disallowed_headers)\n"
+        "assert disallowed.status_code == 400\n"
+        "assert 'access-control-allow-origin' not in disallowed.headers\n"
+        "print('production CORS login preflight, login response, and origin rejection passed')\n",
         env,
     )
 
     assert result.returncode == 0, result.stderr
-    assert "explicit CORS origins accepted; unlisted origin rejected" in result.stdout
+    assert "production CORS login preflight, login response, and origin rejection passed" in result.stdout
 
 
 def test_local_cors_origins_keep_development_defaults():
