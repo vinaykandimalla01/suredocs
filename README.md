@@ -339,7 +339,14 @@ SureDocs was built with an **AI-assisted software engineering workflow**. AI too
   <img src="https://img.shields.io/badge/Google%20AI%20Studio-Prompt%20Experimentation-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Google AI Studio" />
 </p>
 
-ToolHow it supported SureDocs**ChatGPT**Broke down requirements, prepared implementation prompts, explained architecture, and helped investigate API, CORS, environment, and deployment errors.**OpenAI Codex**Supported code-focused tasks such as understanding an existing codebase, implementing scoped changes, and investigating defects.**GitHub Copilot**Provided coding assistance for routine implementation, code completion, and exploring possible fixes.**Claude / Claude Code**Supported technical reasoning and codebase-oriented work, including reviewing workflows and refining implementation tasks.**Omni Router**Helped access or route between available AI models as part of a multi-model development workflow.**Google AI Studio**Provided an environment for experimenting with prompts and Google AI models while exploring technical approaches.
+| Tool | How it supported SureDocs |
+| --- | --- |
+| **ChatGPT** | Broke down requirements, prepared implementation prompts, explained architecture, and helped investigate API, CORS, environment, and deployment errors. |
+| **OpenAI Codex** | Supported code-focused tasks such as understanding an existing codebase, implementing scoped changes, and investigating defects. |
+| **GitHub Copilot** | Provided coding assistance for routine implementation, code completion, and exploring possible fixes. |
+| **Claude / Claude Code** | Supported technical reasoning and codebase-oriented work, including reviewing workflows and refining implementation tasks. |
+| **Omni Router** | Helped access or route between available AI models as part of a multi-model development workflow. |
+| **Google AI Studio** | Provided an environment for experimenting with prompts and Google AI models while exploring technical approaches. |
 
 > **Model note:** The exact model IDs and versions are not listed because they should be taken from actual tool history. AI tools were used for development assistance; this does **not** mean SureDocs has a runtime dependency on these models.
 
@@ -352,11 +359,18 @@ Specialized Claude skills were used or selected to help guide frontend design an
 These are **skills/workflows**, not necessarily separate AI models. Their contribution depends on the skill version and how it was invoked.
 
 ## 🏗️ Where AI helped
-SureDocs areaAI-assisted work**Authentication & roles**Shaped requirements for user roles, account states, and server-side permission checks.**Document workflows**Specified upload, viewing, downloading, editing, deletion, sharing, and access-request behavior.**Storage & database**Worked through the application design for private Amazon S3 files and PostgreSQL metadata.**Frontend & UX**Refined React screens, dashboards, document tables, permissions, navigation, and dialogs.**Testing & security**Prepared negative test scenarios for unauthorized access, invalid requests, and revoked permissions.**Deployment**Investigated CORS, dependencies, environment variables, API availability, and production configuration.
+
+| SureDocs area | AI-assisted work |
+| --- | --- |
+| **Authentication & roles** | Shaped requirements for user roles, account states, and server-side permission checks. |
+| **Document workflows** | Specified upload, viewing, downloading, editing, deletion, sharing, and access-request behavior. |
+| **Storage & database** | Worked through the application design for private Amazon S3 files and PostgreSQL metadata. |
+| **Frontend & UX** | Refined React screens, dashboards, document tables, permissions, navigation, and dialogs. |
+| **Testing & security** | Prepared negative test scenarios for unauthorized access, invalid requests, and revoked permissions. |
+| **Deployment** | Investigated CORS, dependencies, environment variables, API availability, and production configuration. |
 
 ## 🔄 Development loop
 
-```
 ```mermaid
 flowchart LR
     A[Define requirement] --> B[Analyze with AI]
@@ -368,7 +382,6 @@ flowchart LR
     G -- No --> H[Debug and refine]
     H --> E
     G -- Yes --> I[Verify deployment]
-```
 ```
 
 ## 🔐 Responsible AI use
