@@ -10,7 +10,7 @@ const auditSeed = [
   ['2026-10-16T15:22:00', 'Uploaded', 'Architecture.png', 'File uploaded (980 KB)', '192.168.1.24', 'Success', 'Windows PC'],
   ['2026-10-15T12:08:00', 'Downloaded', 'Employee_Handbook.pdf', 'File downloaded (4.6 MB)', '192.168.1.24', 'Success', 'Windows PC'],
   ['2026-10-14T10:35:00', 'Edited', 'Meeting_Notes.txt', 'Document details updated', '192.168.1.89', 'Success', 'MacBook Pro'],
-  ['2026-10-13T08:14:00', 'Failed Login', '—', 'Invalid 2FA code', '203.0.113.45', 'Denied', 'Unknown'],
+  ['2026-10-13T08:14:00', 'Failed Login', '—', 'Invalid password', '203.0.113.45', 'Denied', 'Unknown'],
   ['2026-10-12T16:55:00', 'Viewed', 'Source_Files.zip', 'Viewed document details', '192.168.1.24', 'Success', 'Windows PC'],
   ['2026-10-11T11:41:00', 'Shared', 'Q3_Report.xlsx', 'Access granted to Priya Mehta', '192.168.1.45', 'Success', 'iPhone 14'],
   ['2026-10-10T09:04:00', 'Deleted', 'Temp_Export.csv', 'Delete permission required', '192.168.1.24', 'Denied', 'Windows PC'],
@@ -152,14 +152,6 @@ export const recentActivity = auditSeed.slice(0, 8).map(([timestamp, action, doc
   status,
   device,
 }))
-export const securityOverview = [
-  { label: 'Account Status', value: 'Active', tone: 'green', icon: 'shield' },
-  { label: '2FA Status', value: 'Enabled', tone: 'green', icon: 'lock' },
-  { label: 'Password Last Changed', value: 'Aug 05, 2026', detail: '79 days ago', tone: 'blue', icon: 'key' },
-]
-
-export const initialSecuritySettings = { twoFactor: true, passwordStrong: true, locked: false, sso: false }
-
 export const initialSessions = [
   { id: 'session-windows', device: 'Windows PC', location: 'Hyderabad, India', ip: '192.168.1.24', browser: 'Chrome 130 / Windows 11', lastActive: 'Oct 22, 2026, 10:24 AM' },
   { id: 'session-iphone', device: 'iPhone 14', location: 'Hyderabad, India', ip: '192.168.1.45', browser: 'Safari 17 / iOS 17', lastActive: 'Oct 21, 2026, 08:12 PM' },
@@ -168,7 +160,7 @@ export const initialSessions = [
 export const failedLogins = [
   { id: 'failed-1', timestamp: 'Oct 19, 2026, 07:45 PM', ip: '192.168.1.120', location: 'Hyderabad, India', reason: 'Incorrect password' },
   { id: 'failed-2', timestamp: 'Oct 19, 2026, 07:42 PM', ip: '192.168.1.120', location: 'Hyderabad, India', reason: 'Incorrect password' },
-  { id: 'failed-3', timestamp: 'Oct 18, 2026, 06:11 PM', ip: '203.0.113.45', location: 'Unknown', reason: 'Invalid 2FA code' },
+  { id: 'failed-3', timestamp: 'Oct 18, 2026, 06:11 PM', ip: '203.0.113.45', location: 'Unknown', reason: 'Incorrect password' },
 ]
 
 export const loginHistory = [
@@ -181,7 +173,6 @@ export const loginHistory = [
 
 export const securityEvents = [
   { id: 'security-1', timestamp: 'Aug 05, 2026, 10:15 AM', event: 'Password changed', details: 'Password changed successfully', status: 'Success' },
-  { id: 'security-2', timestamp: 'Jun 12, 2026, 09:20 AM', event: '2FA enabled', details: 'Two-factor authentication enabled', status: 'Success' },
   { id: 'security-3', timestamp: 'Jan 12, 2024, 09:18 AM', event: 'Account created', details: 'User account created by Priya Mehta', status: 'Success' },
   { id: 'security-4', timestamp: 'Jan 12, 2024, 09:18 AM', event: 'Invitation sent', details: 'Invitation email sent to rahul.sharma@suredocs.com', status: 'Success' },
 ]

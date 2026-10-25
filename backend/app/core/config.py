@@ -180,7 +180,6 @@ LOCKOUT_DURATION_SECONDS: int = 15 * 60  # 15 minutes
 AWS_REGION: str = os.getenv("AWS_REGION") or os.getenv(
     "SUREDOCS_AWS_REGION", "ap-south-1"
 )
-AWS_MFA_KMS_KEY_ID: str | None = os.getenv("SUREDOCS_MFA_KMS_KEY_ID") or None
 AWS_ENDPOINT_URL_S3: str | None = os.getenv("AWS_ENDPOINT_URL_S3") or None
 S3_BUCKET: str = os.getenv(
     "SUREDOCS_S3_BUCKET",

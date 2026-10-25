@@ -8,7 +8,6 @@ import uuid
 from app.core.security import generate_session_token, hash_session_token
 from app.models.auth_event import AuthEvent, AuthEventType
 from app.models.documents import Document, DocumentAuditLog, DocumentPermission, DocumentVersion
-from app.models.persistence import UserMfaMethod
 from app.models.user import User
 from app.models.user_session import UserSession
 
@@ -135,13 +134,6 @@ def test_admin_user_profile_returns_real_document_permission_and_security_data(
         user_agent="Test Browser",
         details={"reason": "invalid_credentials"},
     ))
-    db.add(UserMfaMethod(
-        user_id=active_employee.id,
-        method_type="TOTP",
-        secret_ciphertext=b"encrypted-test-secret",
-        is_enabled=True,
-        confirmed_at=now,
-    ))
     db.flush()
 
     response = client.get(f"/api/admin/users/{active_employee.id}/profile")
@@ -155,10 +147,9 @@ def test_admin_user_profile_returns_real_document_permission_and_security_data(
     assert payload["documents"][0]["filename"] == "profile-test.pdf"
     assert payload["documents"][0]["storage_reference_configured"] is True
     assert payload["permissions"][0]["direction"] == "granted"
-    assert payload["security"]["two_factor_enabled"] is True
+    assert "two_factor_enabled" not in payload["security"]
     assert any(event["action"] == "LOGIN_FAILED" for event in payload["events"])
     assert "storage_key" not in response.text
-    assert "encrypted-test-secret" not in response.text
     assert "session_token_hash" not in response.text
 
     shared_profile = client.get(f"/api/admin/users/{active_admin.id}/profile")

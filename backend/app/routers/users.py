@@ -17,17 +17,9 @@ from app.core.security import hash_password, hash_session_token, verify_password
 from app.db.session import get_db
 from app.models.auth_event import AuthEvent, AuthEventType
 from app.models.documents import Document, DocumentAuditLog, DocumentPermission, DocumentVersion
-from app.models.persistence import Notification, UserMfaMethod
+from app.models.persistence import Notification
 from app.models.user import AccountStatus, User, UserRole
 from app.models.user_session import UserSession
-from app.services.mfa import (
-    MfaServiceUnavailable,
-    decrypt_totp_secret,
-    encrypt_totp_secret,
-    generate_totp_secret,
-    provisioning_uri,
-    verify_totp,
-)
 from app.services.notifications import (
     DEFAULT_DISPLAY_SETTINGS,
     DEFAULT_NOTIFICATION_SETTINGS,
@@ -51,9 +43,6 @@ from app.schemas.users import (
     AdminUserUpdateRequest,
     StorageBreakdownItem,
     StorageSummaryResponse,
-    TotpConfirmRequest,
-    TotpDisableRequest,
-    TotpSetupRequest,
     UserSessionItem,
 )
 
@@ -581,13 +570,6 @@ async def get_admin_user_profile_data(
             UserSession.expires_at > now,
         )
     ) or 0
-    mfa_enabled = db.scalar(
-        select(UserMfaMethod.id).where(
-            UserMfaMethod.user_id == user.id,
-            UserMfaMethod.method_type == "TOTP",
-            UserMfaMethod.is_enabled.is_(True),
-        ).limit(1)
-    ) is not None
     creator = db.get(User, user.created_by) if user.created_by else None
 
     return {
@@ -623,7 +605,6 @@ async def get_admin_user_profile_data(
             "failed_login_attempts": user.failed_login_attempts,
         },
         "security": {
-            "two_factor_enabled": mfa_enabled,
             "locked_until": user.locked_until,
             "password_changed_at": user.password_changed_at,
             "email_verified_at": user.email_verified_at,
@@ -788,14 +769,7 @@ async def update_user(
 
 
 
-def _profile_response(user: User, db: Session) -> EmployeeMyProfileResponse:
-    mfa_enabled = db.execute(
-        select(UserMfaMethod.id).where(
-            UserMfaMethod.user_id == user.id,
-            UserMfaMethod.method_type == "TOTP",
-            UserMfaMethod.is_enabled.is_(True),
-        )
-    ).scalar_one_or_none() is not None
+def _profile_response(user: User) -> EmployeeMyProfileResponse:
     return EmployeeMyProfileResponse(
         id=user.id,
         full_name=user.full_name,
@@ -811,7 +785,6 @@ def _profile_response(user: User, db: Session) -> EmployeeMyProfileResponse:
         phone=user.phone,
         location=user.location,
         bio=user.bio,
-        two_factor_enabled=mfa_enabled,
     )
 
 
@@ -837,9 +810,8 @@ def _security_event(
 @employee_router.get("/me/profile", response_model=EmployeeMyProfileResponse)
 async def get_my_profile(
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ) -> EmployeeMyProfileResponse:
-    return _profile_response(user, db)
+    return _profile_response(user)
 
 
 @employee_router.patch("/me/profile", response_model=EmployeeMyProfileResponse)
@@ -858,7 +830,7 @@ async def update_my_profile(
     user.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
-    return _profile_response(user, db)
+    return _profile_response(user)
 
 
 @employee_router.post("/me/password")
@@ -913,130 +885,6 @@ async def update_password(
         )
     db.commit()
     return {"status": "success", "message": "Password updated successfully."}
-
-
-@employee_router.post("/me/2fa/setup")
-async def setup_two_factor(
-    body: TotpSetupRequest,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    if not user.password_hash or not verify_password(body.current_password, user.password_hash):
-        raise HTTPException(status_code=400, detail="Current password is incorrect.")
-    now = datetime.now(timezone.utc)
-    method = db.execute(
-        select(UserMfaMethod)
-        .where(UserMfaMethod.user_id == user.id, UserMfaMethod.method_type == "TOTP")
-        .with_for_update()
-    ).scalar_one_or_none()
-    if method is not None and method.is_enabled:
-        raise HTTPException(status_code=409, detail="Two-factor authentication is already enabled.")
-    secret = generate_totp_secret()
-    try:
-        ciphertext = encrypt_totp_secret(secret)
-    except MfaServiceUnavailable as exc:
-        raise HTTPException(status_code=503, detail="Two-factor setup is unavailable because encryption is not configured.") from exc
-    expires_at = now + timedelta(minutes=10)
-    if method is None:
-        method = UserMfaMethod(
-            user_id=user.id,
-            method_type="TOTP",
-            secret_ciphertext=ciphertext,
-            is_enabled=False,
-            setup_expires_at=expires_at,
-            confirmed_at=None,
-            last_used_counter=None,
-        )
-        db.add(method)
-    else:
-        method.secret_ciphertext = ciphertext
-        method.is_enabled = False
-        method.setup_expires_at = expires_at
-        method.confirmed_at = None
-        method.last_used_counter = None
-        method.updated_at = now
-    db.commit()
-    return {
-        "secret": secret,
-        "otpauth_url": provisioning_uri(secret, user.email),
-        "expires_at": expires_at,
-    }
-
-
-@employee_router.post("/me/2fa/confirm")
-async def confirm_two_factor(
-    body: TotpConfirmRequest,
-    request: Request,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    method = db.execute(
-        select(UserMfaMethod)
-        .where(UserMfaMethod.user_id == user.id, UserMfaMethod.method_type == "TOTP")
-        .with_for_update()
-    ).scalar_one_or_none()
-    now = datetime.now(timezone.utc)
-    if method is None or method.is_enabled or method.setup_expires_at is None or method.setup_expires_at <= now:
-        raise HTTPException(status_code=409, detail="Start a new two-factor setup before confirming.")
-    try:
-        secret = decrypt_totp_secret(method.secret_ciphertext)
-    except MfaServiceUnavailable as exc:
-        raise HTTPException(status_code=503, detail="Two-factor verification is temporarily unavailable.") from exc
-    counter = verify_totp(secret, body.code)
-    if counter is None:
-        _security_event(db, request, user, AuthEventType.MFA_REJECTED, {"reason": "setup_code_invalid"})
-        db.commit()
-        raise HTTPException(status_code=400, detail="The authenticator code is invalid.")
-    method.is_enabled = True
-    method.confirmed_at = now
-    method.setup_expires_at = None
-    method.last_used_counter = counter
-    method.updated_at = now
-    _security_event(db, request, user, AuthEventType.MFA_ENABLED)
-    db.commit()
-    return {"two_factor_enabled": True}
-
-
-@employee_router.post("/me/2fa/disable")
-async def disable_two_factor(
-    body: TotpDisableRequest,
-    request: Request,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    method = db.execute(
-        select(UserMfaMethod)
-        .where(
-            UserMfaMethod.user_id == user.id,
-            UserMfaMethod.method_type == "TOTP",
-            UserMfaMethod.is_enabled.is_(True),
-        )
-        .with_for_update()
-    ).scalar_one_or_none()
-    if method is None:
-        raise HTTPException(status_code=409, detail="Two-factor authentication is not enabled.")
-    if not user.password_hash or not verify_password(body.current_password, user.password_hash):
-        raise HTTPException(status_code=400, detail="Current password is incorrect.")
-    try:
-        secret = decrypt_totp_secret(method.secret_ciphertext)
-    except MfaServiceUnavailable as exc:
-        raise HTTPException(status_code=503, detail="Two-factor verification is temporarily unavailable.") from exc
-    counter = verify_totp(secret, body.code, last_used_counter=method.last_used_counter)
-    if counter is None:
-        _security_event(db, request, user, AuthEventType.MFA_REJECTED, {"reason": "disable_code_invalid"})
-        db.commit()
-        raise HTTPException(status_code=400, detail="The authenticator code is invalid.")
-    db.delete(method)
-    _security_event(db, request, user, AuthEventType.MFA_DISABLED)
-    db.commit()
-    return {"two_factor_enabled": False}
-
-
-@employee_router.post("/me/2fa/toggle")
-async def toggle_two_factor_deprecated(
-    user: User = Depends(get_current_user),
-) -> dict:
-    raise HTTPException(status_code=409, detail="Use the two-factor setup, confirmation, or disable workflow.")
 
 
 def _session_device(user_agent: str | None) -> str:

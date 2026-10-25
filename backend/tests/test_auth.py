@@ -53,6 +53,9 @@ def logout(client: TestClient) -> dict:
 class TestCredentialVerification:
     """Tests 1–9: correct/incorrect credentials, email normalization."""
 
+    def test_login_request_exposes_only_email_and_password(self):
+        assert set(LoginRequest.model_fields) == {"email", "password"}
+
     def test_login_request_accepts_suredocs_synthetic_email_domain(self):
         request = LoginRequest(
             email="synthetic.user@suredocs.test",

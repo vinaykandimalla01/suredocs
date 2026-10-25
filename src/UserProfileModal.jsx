@@ -201,15 +201,13 @@ function LiveProfileTab({ tab, data, onTabChange }) {
     }))
     return <div className="profile-tab-content security-tab">
       <SectionTitle icon="shield" title="Security Overview" subtitle="Authentication and session facts persisted for this account." />
-      <MetricGrid columns={4} items={[
+      <MetricGrid columns={3} items={[
         { label: 'Account Status', value: prettyAction(user.account_status), tone: user.account_status === 'ACTIVE' ? 'green' : 'red', icon: 'shield' },
-        { label: 'Two-Factor Authentication', value: security.two_factor_enabled ? 'Enabled' : 'Disabled', tone: security.two_factor_enabled ? 'green' : 'orange', icon: 'lock' },
         { label: 'Active Sessions', value: summary.active_sessions, tone: 'blue', icon: 'device' },
         { label: 'Failed Login Attempts', value: summary.failed_login_attempts, tone: 'red', icon: 'blocked' },
       ]} />
       <div className="security-grid">
         <Card title="Persisted Security Settings"><div className="profile-information-grid">
-          <KeyValue label="Two-Factor Authentication">{security.two_factor_enabled ? 'Enabled' : 'Disabled'}</KeyValue>
           <KeyValue label="Account Lock">{security.locked_until ? `Locked until ${displayDate(security.locked_until)}` : 'Not currently locked'}</KeyValue>
           <KeyValue label="Email Verification">{security.email_verified_at ? displayDate(security.email_verified_at) : 'Not verified'}</KeyValue>
           <KeyValue label="Password Changed">{displayDate(security.password_changed_at)}</KeyValue>

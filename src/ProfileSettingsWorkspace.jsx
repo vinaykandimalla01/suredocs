@@ -291,13 +291,7 @@ export default function ProfileSettingsWorkspace({ initialSection = 'account', u
   const [updatingPassword, setUpdatingPassword] = useState(false)
 
   // Security state
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
   const [sessions, setSessions] = useState([])
-  const [mfaFlow, setMfaFlow] = useState(null)
-  const [mfaCode, setMfaCode] = useState('')
-  const [mfaPassword, setMfaPassword] = useState('')
-  const [mfaError, setMfaError] = useState('')
-  const [mfaBusy, setMfaBusy] = useState(false)
 
   // Notifications state (all 7 exact reference settings)
   const [notifications, setNotifications] = useState({
@@ -359,9 +353,6 @@ export default function ProfileSettingsWorkspace({ initialSection = 'account', u
           location: data.location ?? '',
           bio: data.bio ?? '',
         }))
-        if (typeof data.two_factor_enabled === 'boolean') {
-          setTwoFactorEnabled(data.two_factor_enabled)
-        }
       })
       .catch(() => {})
 
@@ -556,43 +547,6 @@ export default function ProfileSettingsWorkspace({ initialSection = 'account', u
   }
 
   // 3. Security Handlers
-  async function handleToggle2FA() {
-    setMfaError('')
-    setMfaFlow({ mode: twoFactorEnabled ? 'disable' : 'setup', awaitingPassword: !twoFactorEnabled })
-    setMfaCode('')
-    setMfaPassword('')
-  }
-
-  async function handleConfirm2FA(event) {
-    event.preventDefault()
-    setMfaBusy(true)
-    setMfaError('')
-    try {
-      if (mfaFlow?.mode === 'setup') {
-        if (mfaFlow.awaitingPassword) {
-          const setup = await apiPost('/api/users/me/2fa/setup', { current_password: mfaPassword })
-          setMfaFlow({ mode: 'setup', ...setup })
-          setMfaPassword('')
-          return
-        }
-        await apiPost('/api/users/me/2fa/confirm', { code: mfaCode })
-        setTwoFactorEnabled(true)
-        showToast('Two-Factor Authentication is now enabled.')
-      } else {
-        await apiPost('/api/users/me/2fa/disable', { code: mfaCode, current_password: mfaPassword })
-        setTwoFactorEnabled(false)
-        showToast('Two-Factor Authentication has been disabled.')
-      }
-      setMfaFlow(null)
-      setMfaCode('')
-      setMfaPassword('')
-    } catch (error) {
-      setMfaError(error.message || 'Two-factor verification failed.')
-    } finally {
-      setMfaBusy(false)
-    }
-  }
-
   async function handleRevokeSession(sessionId) {
     try {
       await apiDelete(`/api/users/me/sessions/${sessionId}`)
@@ -1182,7 +1136,7 @@ export default function ProfileSettingsWorkspace({ initialSection = 'account', u
               </div>
             </div>
 
-            {/* Two Side-by-Side Cards: Change Password & 2FA */}
+            {/* Change Password */}
             <div className="ps-security-grid">
               {/* Change Password Card */}
               <div className="ps-card">
@@ -1268,63 +1222,6 @@ export default function ProfileSettingsWorkspace({ initialSection = 'account', u
                 </form>
               </div>
 
-              {/* Two-Factor Authentication Card */}
-              <div className="ps-card flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <PsiIcon className="h-5 w-5 text-[#3b49df]" name="shield" />
-                    <h3 className="ps-card-heading">Two-Factor Authentication</h3>
-                  </div>
-                  <p className="ps-card-subtitle mb-4">Add an extra layer of security to your account.</p>
-
-                  <div className="ps-2fa-box">
-                    <div className="ps-2fa-status">
-                      {twoFactorEnabled ? 'Enabled' : 'Not Enabled'}
-                    </div>
-                    <p className="ps-2fa-desc">
-                      {twoFactorEnabled
-                        ? 'Two-factor authentication is active. Your account is protected.'
-                        : 'Enable 2FA to protect your account from unauthorized access.'}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  className="ps-btn-primary w-full"
-                  onClick={handleToggle2FA}
-                  type="button"
-                >
-                  {twoFactorEnabled ? 'Disable 2FA' : 'Enable 2FA'}
-                </button>
-                {mfaError && !mfaFlow && <p className="mt-3 text-xs font-semibold text-rose-600" role="alert">{mfaError}</p>}
-                {mfaFlow && (
-                  <form className="mt-4 space-y-3 rounded-xl border border-slate-200 p-4" onSubmit={handleConfirm2FA}>
-                    {mfaFlow.mode === 'setup' && mfaFlow.awaitingPassword ? (
-                      <label className="block text-sm font-medium text-slate-700">Current password
-                        <input autoComplete="current-password" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" onChange={(event) => setMfaPassword(event.target.value)} type="password" value={mfaPassword} />
-                      </label>
-                    ) : mfaFlow.mode === 'setup' ? (
-                      <div>
-                        <p className="text-sm font-medium text-slate-800">Add this key in your authenticator app.</p>
-                        <code className="mt-2 block break-all rounded-lg bg-slate-50 p-3 text-sm font-semibold text-slate-900">{mfaFlow.secret}</code>
-                        <a className="mt-2 inline-block text-xs font-semibold text-indigo-700 underline" href={mfaFlow.otpauth_url}>Open authenticator app</a>
-                      </div>
-                    ) : (
-                      <label className="block text-sm font-medium text-slate-700">Current password
-                        <input autoComplete="current-password" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" onChange={(event) => setMfaPassword(event.target.value)} type="password" value={mfaPassword} />
-                      </label>
-                    )}
-                    {!mfaFlow.awaitingPassword && <label className="block text-sm font-medium text-slate-700">Authenticator code
-                      <input autoComplete="one-time-code" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" inputMode="numeric" maxLength={6} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))} value={mfaCode} />
-                    </label>}
-                    {mfaError && <p className="text-xs font-semibold text-rose-600" role="alert">{mfaError}</p>}
-                    <div className="flex gap-2">
-                      <button className="ps-btn-primary flex-1" disabled={mfaBusy || (mfaFlow.awaitingPassword ? !mfaPassword : mfaCode.length !== 6 || (mfaFlow.mode === 'disable' && !mfaPassword))} type="submit">{mfaBusy ? 'Verifying…' : mfaFlow.awaitingPassword ? 'Continue' : mfaFlow.mode === 'setup' ? 'Verify and Enable' : 'Verify and Disable'}</button>
-                      <button className="ps-btn-outline" onClick={() => { setMfaFlow(null); setMfaError('') }} type="button">Cancel</button>
-                    </div>
-                  </form>
-                )}
-              </div>
             </div>
 
             {/* Active Sessions Card */}

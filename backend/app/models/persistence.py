@@ -1,4 +1,4 @@
-"""Persistent access requests, user preferences, notifications, and MFA methods."""
+"""Persistent access requests, user preferences, and notifications."""
 
 from __future__ import annotations
 
@@ -7,13 +7,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
-    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -181,47 +179,6 @@ class UserPreference(Base):
     __table_args__ = (
         CheckConstraint("jsonb_typeof(notification_settings) = 'object'", name="ck_user_preferences_notifications_object"),
         CheckConstraint("jsonb_typeof(display_settings) = 'object'", name="ck_user_preferences_display_object"),
-    )
-
-
-class UserMfaMethod(Base):
-    __tablename__ = "user_mfa_methods"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
-        server_default=func.gen_random_uuid(),
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    method_type: Mapped[str] = mapped_column(
-        String(16), nullable=False, server_default=text("'TOTP'"),
-    )
-    secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    is_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false"),
-    )
-    setup_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
-    )
-    confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
-    )
-    last_used_counter: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "method_type", name="uq_user_mfa_methods_user_type"),
-        CheckConstraint("method_type = 'TOTP'", name="ck_user_mfa_methods_type"),
-        CheckConstraint("NOT is_enabled OR confirmed_at IS NOT NULL", name="ck_user_mfa_methods_enabled_confirmed"),
-        Index("ix_user_mfa_methods_user_enabled", "user_id", "is_enabled"),
     )
 
 

@@ -14,6 +14,5 @@ from app.models.persistence import (  # noqa: F401
     AccessRequest,
     DocumentAuditSecurityFlag,
     Notification,
-    UserMfaMethod,
     UserPreference,
 )

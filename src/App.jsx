@@ -224,11 +224,10 @@ function AccessIllustration() {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function apiLogin(email, password, totpCode) {
+async function apiLogin(email, password) {
   return apiPost('/api/auth/login', {
     email,
     password,
-    ...(totpCode ? { totp_code: totpCode } : {}),
   })
 }
 
@@ -248,8 +247,6 @@ async function apiLogout() {
 function LoginForm({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [totpCode, setTotpCode] = useState('')
-  const [needsTotp, setNeedsTotp] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
@@ -273,15 +270,10 @@ function LoginForm({ onLogin }) {
 
     setLoading(true)
     try {
-      const data = await apiLogin(trimmedEmail, password, totpCode)
+      const data = await apiLogin(trimmedEmail, password)
       onLogin(data.user)
     } catch (err) {
-      if (err.message?.includes('Authenticator code required')) {
-        setNeedsTotp(true)
-        setNotice('Enter the current code from your authenticator app, then sign in again.')
-      } else {
-        setNotice(err.message || 'Authentication failed. Please try again.')
-      }
+      setNotice(err.message || 'Authentication failed. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -289,16 +281,12 @@ function LoginForm({ onLogin }) {
 
   function updateEmail(event) {
     setEmail(event.target.value)
-    setNeedsTotp(false)
-    setTotpCode('')
     if (errors.email) setErrors((current) => ({ ...current, email: '' }))
     setNotice('')
   }
 
   function updatePassword(event) {
     setPassword(event.target.value)
-    setNeedsTotp(false)
-    setTotpCode('')
     if (errors.password) setErrors((current) => ({ ...current, password: '' }))
     setNotice('')
   }
@@ -339,17 +327,6 @@ function LoginForm({ onLogin }) {
               </button>
             }
           />
-          {needsTotp && (
-            <LoginField
-              error={errors.totpCode}
-              id="totpCode"
-              label="Authenticator code"
-              onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="6-digit code"
-              type="text"
-              value={totpCode}
-            />
-          )}
           <div className="login-options">
             <label className="login-remember">
               <input

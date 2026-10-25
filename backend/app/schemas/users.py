@@ -107,7 +107,6 @@ class EmployeeMyProfileResponse(BaseModel):
     phone: str | None = None
     location: str | None = None
     bio: str | None = None
-    two_factor_enabled: bool = False
 
 
 class EmployeeProfileUpdateRequest(BaseModel):
@@ -188,25 +187,6 @@ class NotificationListResponse(BaseModel):
     items: list[NotificationResponse]
     total: int
     unread_count: int
-
-
-class TotpConfirmRequest(BaseModel):
-    code: str = Field(min_length=6, max_length=8)
-
-    @field_validator("code")
-    @classmethod
-    def digits_only(cls, value: str) -> str:
-        if not value.isdigit():
-            raise ValueError("Enter the numeric authenticator code.")
-        return value
-
-
-class TotpSetupRequest(BaseModel):
-    current_password: str = Field(min_length=1, max_length=128)
-
-
-class TotpDisableRequest(TotpConfirmRequest):
-    current_password: str = Field(min_length=1, max_length=128)
 
 
 class ConnectedAccountItem(BaseModel):
