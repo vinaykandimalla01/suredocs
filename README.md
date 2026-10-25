@@ -11,6 +11,8 @@ Use these credentials only for the provisioned SureDocs demo environment. Do not
 | Demo Admin | `admin@suredocs.test` | `SdTest-pO%LBVMdbZzpaS8VR01V!n` |
 | Demo Employee | `sanjay.kumar.0021@suredocs.test` | `SdTest-QYVuH%RlcoaPwy@5OMw@jy` |
 
+Live website link  : https://suredocs-one.vercel.app/
+
 The local seeding command below creates separate local-only demo accounts and generates their passwords in ignored files under `secrets/`; those accounts are distinct from the demo accounts listed above.
 
 ## Technology stack
@@ -179,4 +181,3 @@ From `backend/` with the virtual environment active:
 ```powershell
 pytest
 ```
-
