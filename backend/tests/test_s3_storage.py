@@ -61,8 +61,25 @@ def test_put_document_removes_uploaded_version_when_head_verification_fails(monk
     ]
 
 
-def test_put_document_wraps_head_errors_and_cleans_up(monkeypatch):
+def test_put_document_logs_head_error_and_cleans_up(monkeypatch, caplog):
+    import logging
+
     from botocore.exceptions import ClientError
+
+    verification_error = ClientError(
+        {
+            "Error": {"Code": "AccessDenied", "Message": "Head denied"},
+            "ResponseMetadata": {
+                "HTTPStatusCode": 403,
+                "RequestId": "head-request-123",
+                "HTTPHeaders": {
+                    "authorization": "must-not-be-logged",
+                    "x-amz-security-token": "token-must-not-be-logged",
+                },
+            },
+        },
+        "HeadObject",
+    )
 
     class FakeS3:
         def __init__(self):
@@ -74,18 +91,95 @@ def test_put_document_wraps_head_errors_and_cleans_up(monkeypatch):
 
         def head_object(self, **kwargs):
             assert kwargs["Key"] == "documents/test"
-            raise ClientError({"Error": {"Code": "InternalError", "Message": "failed"}}, "HeadObject")
+            raise verification_error
 
         def delete_object(self, **kwargs):
             self.deleted.append(kwargs)
 
     fake_s3 = FakeS3()
     monkeypatch.setattr("app.services.s3_storage.get_s3_client", lambda: fake_s3)
+    caplog.set_level(logging.ERROR, logger="app.services.s3_storage")
 
-    with pytest.raises(StorageUnavailableError, match="verification failed"):
+    with pytest.raises(
+        StorageUnavailableError,
+        match="verification failed",
+    ) as exc_info:
         put_document("documents/test", BytesIO(b"abc"), content_type="text/plain", checksum_sha256="expected-checksum")
 
     assert fake_s3.deleted == [{"Bucket": S3_BUCKET, "Key": "documents/test"}]
+    assert exc_info.value.__cause__ is verification_error
+    assert "Error.Code=AccessDenied" in caplog.text
+    assert "Error.Message=Head denied" in caplog.text
+    assert "ResponseMetadata.HTTPStatusCode=403" in caplog.text
+    assert "ResponseMetadata.RequestId=head-request-123" in caplog.text
+    assert "operation_name=HeadObject" in caplog.text
+    assert "must-not-be-logged" not in caplog.text
+    assert "token-must-not-be-logged" not in caplog.text
+
+
+def test_put_document_cleanup_client_error_does_not_hide_verification_error(
+    monkeypatch, caplog
+):
+    import logging
+
+    from botocore.exceptions import ClientError
+
+    verification_error = ClientError(
+        {
+            "Error": {"Code": "InvalidObjectState", "Message": "Verification failed"},
+            "ResponseMetadata": {
+                "HTTPStatusCode": 409,
+                "RequestId": "verification-request-456",
+            },
+        },
+        "HeadObject",
+    )
+    cleanup_error = ClientError(
+        {
+            "Error": {"Code": "AccessDenied", "Message": "Delete denied"},
+            "ResponseMetadata": {
+                "HTTPStatusCode": 403,
+                "RequestId": "cleanup-request-789",
+                "HTTPHeaders": {"authorization": "must-not-be-logged"},
+            },
+        },
+        "DeleteObject",
+    )
+
+    class FakeS3:
+        def put_object(self, **kwargs):
+            return {"VersionId": "s3-version-123"}
+
+        def head_object(self, **kwargs):
+            raise verification_error
+
+        def delete_object(self, **kwargs):
+            raise cleanup_error
+
+    monkeypatch.setattr("app.services.s3_storage.get_s3_client", lambda: FakeS3())
+    caplog.set_level(logging.ERROR, logger="app.services.s3_storage")
+
+    with pytest.raises(
+        StorageUnavailableError,
+        match="verification failed",
+    ) as exc_info:
+        put_document(
+            "documents/test",
+            BytesIO(b"abc"),
+            content_type="text/plain",
+            checksum_sha256="expected-checksum",
+        )
+
+    assert exc_info.value.__cause__ is verification_error
+    assert "Error.Code=InvalidObjectState" in caplog.text
+    assert "Error.Message=Verification failed" in caplog.text
+    assert "ResponseMetadata.RequestId=verification-request-456" in caplog.text
+    assert "operation_name=HeadObject" in caplog.text
+    assert "Error.Code=AccessDenied" in caplog.text
+    assert "Error.Message=Delete denied" in caplog.text
+    assert "ResponseMetadata.RequestId=cleanup-request-789" in caplog.text
+    assert "operation_name=DeleteObject" in caplog.text
+    assert "must-not-be-logged" not in caplog.text
 
 
 @pytest.mark.parametrize(

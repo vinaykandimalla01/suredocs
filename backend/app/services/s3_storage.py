@@ -105,11 +105,23 @@ def put_document(
             try:
                 client.delete_object(**cleanup_arguments)
             except (BotoCoreError, ClientError, NoCredentialsError) as cleanup_exc:
-                logger.error("S3 verification cleanup failed (%s)", type(cleanup_exc).__name__)
+                if isinstance(cleanup_exc, ClientError):
+                    _log_s3_client_error("verification cleanup", cleanup_exc)
+                else:
+                    logger.error(
+                        "S3 verification cleanup failed (%s)",
+                        type(cleanup_exc).__name__,
+                    )
             if isinstance(exc, StorageUnavailableError):
                 raise
             if isinstance(exc, (BotoCoreError, ClientError, NoCredentialsError)):
-                logger.error("S3 document verification failed (%s)", type(exc).__name__)
+                if isinstance(exc, ClientError):
+                    _log_s3_client_error("document verification", exc)
+                else:
+                    logger.error(
+                        "S3 document verification failed (%s)",
+                        type(exc).__name__,
+                    )
                 raise StorageUnavailableError(
                     "Document storage verification failed. The upload was not completed."
                 ) from exc
@@ -134,12 +146,11 @@ def get_document(key: str, version_id: str | None = None):
         return get_s3_client().get_object(**arguments)
     except ClientError as exc:
         error_code = exc.response.get("Error", {}).get("Code", "")
+        _log_s3_client_error("document retrieval", exc)
         if error_code in {"NoSuchKey", "NoSuchVersion", "404", "NotFound"}:
-            logger.error("S3 document object is missing (%s)", error_code)
             raise StorageObjectNotFoundError(
                 "The document file could not be found in private storage."
             ) from exc
-        logger.error("S3 document retrieval failed (%s)", type(exc).__name__)
         raise StorageUnavailableError(
             "The document file is temporarily unavailable."
         ) from exc
@@ -158,7 +169,10 @@ def delete_document_object(key: str, version_id: str | None = None) -> None:
     try:
         get_s3_client().delete_object(**arguments)
     except (BotoCoreError, ClientError, NoCredentialsError) as exc:
-        logger.error("S3 upload compensation failed (%s)", type(exc).__name__)
+        if isinstance(exc, ClientError):
+            _log_s3_client_error("upload compensation", exc)
+        else:
+            logger.error("S3 upload compensation failed (%s)", type(exc).__name__)
         raise StorageUnavailableError(
             "The uploaded object could not be removed after a database failure."
         ) from exc
@@ -199,13 +213,22 @@ def copy_document_object(
         except StorageUnavailableError:
             raise
         except (BotoCoreError, ClientError, NoCredentialsError) as exc:
-            logger.error("Promoted S3 document verification failed (%s)", type(exc).__name__)
+            if isinstance(exc, ClientError):
+                _log_s3_client_error("document promotion verification", exc)
+            else:
+                logger.error(
+                    "Promoted S3 document verification failed (%s)",
+                    type(exc).__name__,
+                )
             raise StorageUnavailableError(
                 "Document promotion verification failed."
             ) from exc
         return version_id
     except (BotoCoreError, ClientError, NoCredentialsError) as exc:
-        logger.error("S3 document copy failed (%s)", type(exc).__name__)
+        if isinstance(exc, ClientError):
+            _log_s3_client_error("document copy", exc)
+        else:
+            logger.error("S3 document copy failed (%s)", type(exc).__name__)
         raise StorageUnavailableError(
             "Document promotion from quarantine failed. The upload was not completed."
         ) from exc
