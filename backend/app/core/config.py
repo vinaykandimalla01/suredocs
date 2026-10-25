@@ -144,11 +144,15 @@ SESSION_SECRET: str = _load_or_create_session_secret()
 # Cookie configuration
 COOKIE_NAME: str = "suredocs_session"
 COOKIE_HTTPONLY: bool = True
-COOKIE_SAMESITE: str = "lax"
+COOKIE_SAMESITE: str = os.getenv("SUREDOCS_COOKIE_SAMESITE", "lax").strip().lower()
 COOKIE_PATH: str = "/"
 
 # In production set SUREDOCS_SECURE_COOKIES=true
 COOKIE_SECURE: bool = os.getenv("SUREDOCS_SECURE_COOKIES", "false").lower() == "true"
+if COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    raise RuntimeError("SUREDOCS_COOKIE_SAMESITE must be lax, strict, or none.")
+if COOKIE_SAMESITE == "none" and not COOKIE_SECURE:
+    raise RuntimeError("SUREDOCS_COOKIE_SAMESITE=none requires SUREDOCS_SECURE_COOKIES=true.")
 
 # Session lifetimes (seconds)
 SESSION_IDLE_TIMEOUT: int = int(os.getenv("SUREDOCS_SESSION_IDLE_TIMEOUT", str(30 * 60)))  # 30 min

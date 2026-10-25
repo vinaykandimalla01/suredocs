@@ -75,6 +75,15 @@ approved data migration and initial account setup before users can sign in.
 For a Vercel deployment, add the Neon variables to the backend project's environment
 settings rather than committing `.env.local`. Also configure a stable `SESSION_SECRET`,
 `SUREDOCS_CORS_ORIGINS` with the verified frontend origin, and
+`SUREDOCS_SECURE_COOKIES=true`. In the frontend Vercel project's Production environment,
+set `VITE_API_BASE_URL=https://suredocs-backned.vercel.app`, then redeploy the frontend
+so Vite embeds the value. The frontend API client also defaults to this backend origin
+for production builds when the variable is absent. For local Vite development, leave
+`VITE_API_BASE_URL` unset to use the `/api` proxy to `http://127.0.0.1:8000`.
+`SUREDOCS_CORS_ORIGINS` must contain the exact deployed frontend origin (scheme and host,
+without a path); preserve any existing allowed origins. If the frontend and backend use
+different site domains (as separate `*.vercel.app` hostnames do), also set
+`SUREDOCS_COOKIE_SAMESITE=none`; the backend rejects this setting unless
 `SUREDOCS_SECURE_COOKIES=true`. Keep both Neon credentials and AWS-compatible storage
 credentials in the backend environment only.
 

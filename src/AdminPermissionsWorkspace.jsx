@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { apiGet, apiGetFile } from './api.js'
+import { apiGet, apiGetFile, apiPost } from './api.js'
 import AdminPermissionDocumentModal from './AdminPermissionDocumentModal.jsx'
 import './AdminPermissionsWorkspace.css'
 
@@ -396,22 +396,15 @@ export default function AdminPermissionsWorkspace({ onOpenDocument }) {
       // Proceed to call POST revoke
     }
     try {
-      const res = await fetch(`/api/admin/permissions/documents/${record.document_id}/grants/${record.id}/revoke`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ reason: reason.trim() }),
-      })
-      if (res.ok) {
-        loadSummary()
-        loadAnalytics()
-        loadRecords()
-      } else {
-        const err = await res.json().catch(() => null)
-        alert(err?.detail || 'Unable to revoke permission.')
-      }
+      await apiPost(
+        `/api/admin/permissions/documents/${record.document_id}/grants/${record.id}/revoke`,
+        { reason: reason.trim() },
+      )
+      loadSummary()
+      loadAnalytics()
+      loadRecords()
     } catch (err) {
-      alert(err.message || 'Revocation failed.')
+      alert(err.message || 'Unable to revoke permission.')
     }
   }
 

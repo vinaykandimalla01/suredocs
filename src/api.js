@@ -1,12 +1,10 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
+import { getApiBaseUrl, resolveApiUrl } from './apiUrl.js'
 
-function apiUrl(path) {
-  return `${API_BASE_URL}${path}`
-}
+const API_BASE_URL = getApiBaseUrl(import.meta.env)
 
 async function fetchApi(path, options) {
   try {
-    return await fetch(apiUrl(path), options)
+    return await fetch(resolveApiUrl(API_BASE_URL, path), options)
   } catch (error) {
     if (error instanceof TypeError) {
       throw new Error('Unable to connect to SureDocs. Check your connection and try again.')
@@ -145,7 +143,7 @@ export async function apiDelete(path, { body, signal } = {}) {
 export function apiUpload(path, body, { onProgress, method = 'POST' } = {}) {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest()
-    request.open(method, apiUrl(path))
+    request.open(method, resolveApiUrl(API_BASE_URL, path))
     request.withCredentials = true
     request.upload.addEventListener('progress', (event) => {
       if (event.lengthComputable && onProgress) {

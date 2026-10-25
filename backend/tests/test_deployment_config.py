@@ -116,6 +116,29 @@ def test_production_app_imports_without_database_or_secret_files():
     assert "import=ok database=unconfigured response=503" in result.stdout
 
 
+def test_cross_site_cookie_configuration_requires_secure_cookies():
+    env = _production_environment()
+    env["SESSION_SECRET"] = "s" * 48
+    env["SUREDOCS_COOKIE_SAMESITE"] = "none"
+    result = _run_backend_snippet(
+        "from app.core.config import COOKIE_SAMESITE, COOKIE_SECURE\n"
+        "assert COOKIE_SAMESITE == 'none'\n"
+        "assert COOKIE_SECURE\n"
+        "print('cross-site cookie uses SameSite=None and Secure')\n",
+        {**env, "SUREDOCS_SECURE_COOKIES": "true"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "cross-site cookie uses SameSite=None and Secure" in result.stdout
+
+    insecure_env = {**env, "SUREDOCS_SECURE_COOKIES": "false"}
+    insecure_result = _run_backend_snippet(
+        "from app.core.config import COOKIE_SAMESITE",
+        insecure_env,
+    )
+    assert insecure_result.returncode != 0
+    assert "requires SUREDOCS_SECURE_COOKIES=true" in insecure_result.stderr
+
+
 def test_production_docs_route_redirects_to_existing_swagger_and_openapi():
     env = _production_environment()
     env["SESSION_SECRET"] = "s" * 48
