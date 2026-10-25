@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@neon/config": "^1.9.4",
+    "@neon/env": "^1.6.5",
     "docx-preview": "^0.4.1",
     "dompurify": "^3.4.17",
     "jszip": "^3.10.2",

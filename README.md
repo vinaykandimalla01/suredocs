@@ -49,6 +49,35 @@ SureDocs is a secure document-sharing platform with a FastAPI backend, SQLAlchem
    python -m app.cli create-admin
    ```
 
+## Neon PostgreSQL and Object Storage
+
+The backend can use Neon's pooled PostgreSQL connection for application queries and
+Neon's S3-compatible private Object Storage without changing the existing SQLAlchemy
+or `boto3` data-access layers.
+
+After linking and deploying the Neon branch, pull its variables into the ignored
+`.env.local` file:
+
+```bash
+neon env pull --file .env.local --service postgres --service object-storage
+```
+
+Local backend startup loads `.env.local`. `DATABASE_URL` is used for normal database
+traffic; Alembic uses the direct `DATABASE_URL_UNPOOLED` connection. The storage
+credentials, endpoint, and region use Neon's AWS-compatible environment variables.
+The app uses the private `assets` bucket when a Neon S3 endpoint is configured.
+
+Run `alembic upgrade head` from `backend/` to apply the schema. This creates or updates
+the schema only; it does not copy users, documents, audit events, or S3 objects from
+the local development services. A new Neon database therefore needs an explicitly
+approved data migration and initial account setup before users can sign in.
+
+For a Vercel deployment, add the Neon variables to the backend project's environment
+settings rather than committing `.env.local`. Also configure a stable `SESSION_SECRET`,
+`SUREDOCS_CORS_ORIGINS` with the verified frontend origin, and
+`SUREDOCS_SECURE_COOKIES=true`. Keep both Neon credentials and AWS-compatible storage
+credentials in the backend environment only.
+
 ## Temporary bulk import utility
 
 The bulk-import script is intentionally separate from the normal document upload flow. It is meant for the existing local documents library under the project root and is not run automatically on app startup.

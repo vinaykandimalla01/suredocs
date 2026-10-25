@@ -1,15 +1,18 @@
 """
 Alembic environment configuration.
 
-Imports all SQLAlchemy models for autogenerate support and loads the
-database URL from the centralized config (which reads secrets from files).
+Imports all SQLAlchemy models for autogenerate support and uses the
+database URL from centralized configuration.
 """
 
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import create_engine, pool
+from sqlalchemy.engine import make_url
 
 from alembic import context
+
+from app.core.config import DATABASE_URL, DATABASE_URL_UNPOOLED
 
 # ---------------------------------------------------------------------------
 # Import the application's database engine and model metadata.
@@ -17,6 +20,20 @@ from alembic import context
 # ---------------------------------------------------------------------------
 from app.db.session import Base, engine
 import app.models  # noqa: F401  — triggers model registration
+
+if engine is None:
+    raise RuntimeError(
+        "Alembic requires database configuration. Set DATABASE_URL or "
+        "SUREDOCS_DB_USER, SUREDOCS_DB_HOST, SUREDOCS_DB_NAME, and DB_PASSWORD."
+    )
+if (
+    DATABASE_URL
+    and "-pooler" in (engine.url.host or "")
+    and not DATABASE_URL_UNPOOLED
+):
+    raise RuntimeError(
+        "Set DATABASE_URL_UNPOOLED to a direct PostgreSQL connection for Neon migrations."
+    )
 
 # Alembic Config object — provides access to the .ini file values.
 config = context.config
@@ -35,7 +52,11 @@ def run_migrations_offline() -> None:
     Configures the context with just the URL so SQL can be emitted
     without needing a live database connection.
     """
-    url = str(engine.url)
+    url = (
+        str(make_url(DATABASE_URL_UNPOOLED))
+        if DATABASE_URL_UNPOOLED
+        else str(engine.url)
+    )
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -50,10 +71,16 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
-    Uses the application's engine directly so the database URL
-    (including the password loaded from the secrets file) is consistent.
+    Uses the application's configured engine directly.
     """
-    connectable = engine
+    connectable = (
+        create_engine(
+            make_url(DATABASE_URL_UNPOOLED).set(drivername="postgresql+psycopg"),
+            poolclass=pool.NullPool,
+        )
+        if DATABASE_URL_UNPOOLED
+        else engine
+    )
 
     with connectable.connect() as connection:
         context.configure(

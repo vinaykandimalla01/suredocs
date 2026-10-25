@@ -6,9 +6,10 @@ import logging
 from typing import BinaryIO
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 
-from app.core.config import AWS_REGION, S3_BUCKET
+from app.core.config import AWS_ENDPOINT_URL_S3, AWS_REGION, S3_BUCKET
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,11 @@ class StorageObjectNotFoundError(StorageUnavailableError):
 
 def get_s3_client():
     """Build an S3 client using the standard AWS credential provider chain."""
-    return boto3.client("s3", region_name=AWS_REGION)
+    s3_options = {"addressing_style": "path"} if AWS_ENDPOINT_URL_S3 else {}
+    client_options = {"region_name": AWS_REGION, "config": Config(s3=s3_options)}
+    if AWS_ENDPOINT_URL_S3:
+        client_options["endpoint_url"] = AWS_ENDPOINT_URL_S3
+    return boto3.client("s3", **client_options)
 
 
 def put_document(

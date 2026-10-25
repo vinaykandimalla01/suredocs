@@ -4,8 +4,29 @@ from io import BytesIO
 
 import pytest
 
-from app.core.config import S3_BUCKET
-from app.services.s3_storage import StorageUnavailableError, put_document
+from app.core.config import AWS_REGION, S3_BUCKET
+from app.services.s3_storage import StorageUnavailableError, get_s3_client, put_document
+
+
+def test_get_s3_client_uses_neon_endpoint_and_path_style(monkeypatch):
+    from app.services import s3_storage
+
+    calls = {}
+
+    def fake_client(service_name, **kwargs):
+        calls["service_name"] = service_name
+        calls["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(s3_storage, "AWS_ENDPOINT_URL_S3", "https://storage.example.test")
+    monkeypatch.setattr(s3_storage.boto3, "client", fake_client)
+
+    get_s3_client()
+
+    assert calls["service_name"] == "s3"
+    assert calls["kwargs"]["region_name"] == AWS_REGION
+    assert calls["kwargs"]["endpoint_url"] == "https://storage.example.test"
+    assert calls["kwargs"]["config"].s3 == {"addressing_style": "path"}
 
 
 def test_put_document_removes_uploaded_version_when_head_verification_fails(monkeypatch):
@@ -47,9 +68,11 @@ def test_put_document_wraps_head_errors_and_cleans_up(monkeypatch):
             self.deleted = []
 
         def put_object(self, **kwargs):
+            assert kwargs["Bucket"] == S3_BUCKET
             return {}
 
         def head_object(self, **kwargs):
+            assert kwargs["Key"] == "documents/test"
             raise ClientError({"Error": {"Code": "InternalError", "Message": "failed"}}, "HeadObject")
 
         def delete_object(self, **kwargs):
