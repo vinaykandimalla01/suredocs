@@ -8,6 +8,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from app.core.config import CORS_ORIGINS
 from app.routers.auth import router as auth_router
@@ -36,6 +37,17 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
 )
+
+
+@app.get("/docs", include_in_schema=False)
+async def redirect_docs() -> RedirectResponse:
+    return RedirectResponse(url="/api/docs")
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def redirect_openapi() -> RedirectResponse:
+    return RedirectResponse(url="/api/openapi.json")
+
 
 # ---------------------------------------------------------------------------
 # CORS — only explicitly permitted frontend origins with credentials

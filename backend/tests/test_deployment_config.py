@@ -116,6 +116,36 @@ def test_production_app_imports_without_database_or_secret_files():
     assert "import=ok database=unconfigured response=503" in result.stdout
 
 
+def test_production_docs_route_redirects_to_existing_swagger_and_openapi():
+    env = _production_environment()
+    env["SESSION_SECRET"] = "s" * 48
+    result = _run_backend_snippet(
+        "from fastapi.testclient import TestClient\n"
+        "from app.main import app\n"
+        "client = TestClient(app)\n"
+        "response = client.get('/docs', follow_redirects=False)\n"
+        "assert response.status_code == 307, response.text\n"
+        "assert response.headers['location'] == '/api/docs'\n"
+        "swagger = client.get('/docs')\n"
+        "assert swagger.status_code == 200\n"
+        "assert 'Swagger UI' in swagger.text\n"
+        "openapi_redirect = client.get('/openapi.json', follow_redirects=False)\n"
+        "assert openapi_redirect.status_code == 307\n"
+        "assert openapi_redirect.headers['location'] == '/api/openapi.json'\n"
+        "openapi_alias = client.get('/openapi.json')\n"
+        "assert openapi_alias.status_code == 200\n"
+        "assert openapi_alias.json()['info']['title'] == 'SureDocs API'\n"
+        "openapi = client.get('/api/openapi.json')\n"
+        "assert openapi.status_code == 200\n"
+        "assert openapi.json()['info']['title'] == 'SureDocs API'\n"
+        "print('production docs redirect, Swagger UI, and OpenAPI passed')\n",
+        env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "production docs redirect, Swagger UI, and OpenAPI passed" in result.stdout
+
+
 def test_production_import_reports_missing_session_secret():
     result = _run_backend_snippet(
         "try:\n"
