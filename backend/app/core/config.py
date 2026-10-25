@@ -144,13 +144,24 @@ SESSION_SECRET: str = _load_or_create_session_secret()
 # Cookie configuration
 COOKIE_NAME: str = "suredocs_session"
 COOKIE_HTTPONLY: bool = True
-COOKIE_SAMESITE: str = os.getenv("SUREDOCS_COOKIE_SAMESITE", "lax").strip().lower()
+COOKIE_SAMESITE: str = os.getenv(
+    "SUREDOCS_COOKIE_SAMESITE",
+    "none" if IS_PRODUCTION else "lax",
+).strip().lower()
 COOKIE_PATH: str = "/"
 
-# In production set SUREDOCS_SECURE_COOKIES=true
-COOKIE_SECURE: bool = os.getenv("SUREDOCS_SECURE_COOKIES", "false").lower() == "true"
+COOKIE_SECURE: bool = os.getenv(
+    "SUREDOCS_SECURE_COOKIES",
+    "true" if IS_PRODUCTION else "false",
+).lower() == "true"
 if COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     raise RuntimeError("SUREDOCS_COOKIE_SAMESITE must be lax, strict, or none.")
+if IS_PRODUCTION and (COOKIE_SAMESITE != "none" or not COOKIE_SECURE):
+    raise RuntimeError(
+        "Production cross-origin session cookies require "
+        "SUREDOCS_COOKIE_SAMESITE=none and SUREDOCS_SECURE_COOKIES=true; "
+        "SameSite=None requires SUREDOCS_SECURE_COOKIES=true."
+    )
 if COOKIE_SAMESITE == "none" and not COOKIE_SECURE:
     raise RuntimeError("SUREDOCS_COOKIE_SAMESITE=none requires SUREDOCS_SECURE_COOKIES=true.")
 

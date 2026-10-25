@@ -74,6 +74,8 @@ def _production_environment() -> dict[str, str]:
         "SUREDOCS_DB_NAME",
         "SUREDOCS_CORS_ORIGINS",
         "SUREDOCS_ENVIRONMENT",
+        "SUREDOCS_COOKIE_SAMESITE",
+        "SUREDOCS_SECURE_COOKIES",
         "VERCEL",
         "VERCEL_ENV",
     ):
@@ -137,6 +139,47 @@ def test_cross_site_cookie_configuration_requires_secure_cookies():
     )
     assert insecure_result.returncode != 0
     assert "requires SUREDOCS_SECURE_COOKIES=true" in insecure_result.stderr
+
+
+def test_production_cookie_defaults_support_cross_origin_session_requests():
+    env = _production_environment()
+    env["SESSION_SECRET"] = "s" * 48
+    result = _run_backend_snippet(
+        "from app.core.config import COOKIE_HTTPONLY, COOKIE_SAMESITE, COOKIE_SECURE\n"
+        "assert COOKIE_HTTPONLY is True\n"
+        "assert COOKIE_SAMESITE == 'none'\n"
+        "assert COOKIE_SECURE is True\n"
+        "print('production session cookies default to HttpOnly, SameSite=None, Secure')\n",
+        env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "production session cookies default to HttpOnly, SameSite=None, Secure" in result.stdout
+
+
+def test_production_rejects_cookie_settings_that_break_cross_origin_sessions():
+    env = _production_environment()
+    env["SESSION_SECRET"] = "s" * 48
+    env["SUREDOCS_COOKIE_SAMESITE"] = "lax"
+    env["SUREDOCS_SECURE_COOKIES"] = "false"
+    result = _run_backend_snippet("from app.core.config import COOKIE_SAMESITE\n", env)
+    assert result.returncode != 0
+    assert "Production cross-origin session cookies require" in result.stderr
+
+
+def test_local_cookie_defaults_remain_unchanged():
+    env = _production_environment()
+    env.pop("VERCEL")
+    env["SESSION_SECRET"] = "local-test-session-secret"
+    result = _run_backend_snippet(
+        "from app.core.config import COOKIE_HTTPONLY, COOKIE_SAMESITE, COOKIE_SECURE\n"
+        "assert COOKIE_HTTPONLY is True\n"
+        "assert COOKIE_SAMESITE == 'lax'\n"
+        "assert COOKIE_SECURE is False\n"
+        "print('local session cookie defaults preserved')\n",
+        env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "local session cookie defaults preserved" in result.stdout
 
 
 def test_production_docs_route_redirects_to_existing_swagger_and_openapi():
