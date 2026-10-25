@@ -162,3 +162,82 @@ The following items must be verified before marking the issue as resolved:
 
 **Fix commit ID:** 0c4cd1352008f05146cd2e60d73f78be725ff486
 
+
+
+# Entry 5 — Integrating ClamAV Antivirus Scanning and Protecting Document Uploads
+
+**Date:** 2026-10-25
+
+### 1. Prompt and Summary
+
+**Summary:** The AI was asked to design the integration of ClamAV antivirus scanning into the SureDocs document-upload workflow. The primary objective was to prevent infected, unscanned, or unsuccessfully scanned files from becoming accessible through the application or entering trusted Amazon S3 document storage.
+
+The proposed solution needed to integrate with the existing FastAPI backend, PostgreSQL document metadata, private S3 storage, Docker Compose environment, authentication, authorization, and audit logging without changing the existing frontend design.
+
+The focus was on implementing a fail-closed security workflow in which a document becomes available only after the scanner returns an acceptable clean result and the file has been successfully stored in its approved location.
+
+**Full Prompt:** `prompts/ClamAV_Antivirus_Upload_Security.md`
+
+### 2. What the AI Produced
+
+The AI produced a detailed implementation specification covering the integration of ClamAV into the existing SureDocs architecture.
+
+The proposed workflow included:
+
+- Running ClamAV in Docker Compose with scanner health checks and signature updates.
+- Integrating malware scanning with the existing document-upload API.
+- Using private quarantine storage before promoting clean files to trusted S3 storage.
+- Defining explicit scan states, including `PENDING_SCAN`, `SCANNING`, `CLEAN`, `INFECTED`, and `SCAN_FAILED`.
+- Storing relevant scan metadata, timestamps, and file hashes in PostgreSQL.
+- Blocking access to files that are infected, unscanned, or associated with failed scans.
+- Preserving document ownership, permission checks, and existing authorization rules.
+- Recording appropriate scan outcomes and blocked uploads in the audit trail.
+- Defining automated tests using clean test files, scanner failures, and the EICAR antivirus test file.
+
+The specification also addressed safe temporary-file handling, upload limits, scanner timeouts, retry behavior, and recovery from S3 or database failures.
+
+### 3. What Was Wrong With It
+
+The main implementation risk was treating a successful file upload as proof that the document was safe.
+
+If antivirus scanning is performed only in the frontend or after a document becomes accessible, an infected file could enter the trusted document repository before the security check completes. Similarly, treating a scanner timeout or service failure as a successful scan could allow an unverified document to bypass the intended security controls.
+
+Another important risk was updating the S3 object and PostgreSQL metadata independently without handling partial failures. For example, a file could be uploaded successfully while its metadata update fails, or a database record could indicate that a document is available even though its security scan or storage promotion has not completed.
+
+These risks require server-side enforcement, controlled storage transitions, consistent metadata updates, and explicit handling of every scanner outcome.
+
+### 4. What I Did Instead
+
+I defined a quarantine-first, fail-closed upload workflow rather than relying on a simple antivirus check or a frontend notification.
+
+The intended implementation authenticates the user, checks upload authorization, validates the file, and sends it for ClamAV scanning before making it accessible through SureDocs.
+
+If ClamAV confirms that the file is clean, the backend can promote it to trusted storage and finalize the document metadata. If the file is infected, the upload must be blocked. If the scanner is unavailable or returns an inconclusive result, the file must remain inaccessible until the issue is resolved.
+
+I also specified that antivirus enforcement must apply to document viewing, downloading, sharing, signed URL generation, and document replacement—not just the initial upload endpoint.
+
+The integration must preserve the existing SureDocs interface, document permissions, PostgreSQL relationships, and S3 access controls. Implementation and testing are required to confirm that these protections work in the running application.
+
+### Implementation Verification
+
+The following items must be verified before marking the issue as resolved:
+
+- ClamAV starts correctly and reports a healthy, ready state in Docker Compose.
+- Signature updates operate correctly.
+- The existing upload API invokes server-side scanning.
+- Clean files become available only after scanning and successful storage promotion.
+- Infected files are blocked and cannot be accessed through normal document endpoints.
+- Scanner timeouts, connection failures, and inconclusive results fail closed.
+- Unscanned and failed-scan files cannot be downloaded or shared.
+- PostgreSQL scan metadata remains consistent with actual S3 storage state.
+- Temporary and quarantined files are handled according to the security-retention policy.
+- Existing authentication, authorization, and document-permission checks remain enforced.
+- Appropriate scan outcomes are recorded in the audit trail.
+- The EICAR antivirus test file is detected and prevented from entering trusted storage.
+- Existing upload, download, permission, and document-management workflows continue to work.
+- Automated tests pass and the implemented behavior is verified in the running application.
+
+### Fix Commit
+
+**Fix commit ID:**  046aac745cf6b7742f995c55a6a770173f037e99
+
