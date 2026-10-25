@@ -1130,6 +1130,9 @@ export default function MyDocumentsWorkspace({ user, initialDocumentId = null, s
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [pendingRequestCount, setPendingRequestCount] = useState(null)
+  const [pendingRequestLoading, setPendingRequestLoading] = useState(true)
+  const [pendingRequestError, setPendingRequestError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const [localSearch, setLocalSearch] = useState('')
   const search = externalSearch ?? localSearch
@@ -1160,6 +1163,32 @@ export default function MyDocumentsWorkspace({ user, initialDocumentId = null, s
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [refreshKey])
+
+  useEffect(() => {
+    let active = true
+    let requestSequence = 0
+    async function loadPendingRequestCount() {
+      const currentRequest = ++requestSequence
+      try {
+        const summary = await apiGet('/api/access-requests/summary')
+        if (!active || currentRequest !== requestSequence) return
+        setPendingRequestCount(summary.pending_requests)
+        setPendingRequestError('')
+      } catch (requestError) {
+        if (!active || currentRequest !== requestSequence) return
+        setPendingRequestCount(null)
+        setPendingRequestError(requestError.message || 'Request data unavailable')
+      } finally {
+        if (active && currentRequest === requestSequence) setPendingRequestLoading(false)
+      }
+    }
+    loadPendingRequestCount()
+    window.addEventListener('suredocs:access-requests-updated', loadPendingRequestCount)
+    return () => {
+      active = false
+      window.removeEventListener('suredocs:access-requests-updated', loadPendingRequestCount)
+    }
+  }, [])
 
   const categories = useMemo(() => [...new Set(documents.map((document) => document.category).filter(Boolean))].sort(), [documents])
   const types = useMemo(() => [...new Set(documents.map(fileType))].sort(), [documents])
@@ -1281,7 +1310,7 @@ export default function MyDocumentsWorkspace({ user, initialDocumentId = null, s
       <section aria-label="Document summary" className="sd-document-summary">
         <SummaryCard color="purple" icon="file" title="Total Documents" value={loading ? '…' : total} detail="Owned by you" />
         <SummaryCard color="green" icon="database" title="Total Storage Used" value={loading ? '…' : formatBytes(storageBytes)} detail="Across all documents" />
-        <SummaryCard color="amber" icon="clock" title="Pending Requests" value="—" detail="Request data unavailable" />
+        <SummaryCard color="amber" icon="clock" title="Pending Requests" value={pendingRequestLoading ? '…' : pendingRequestCount ?? '—'} detail={pendingRequestError || 'Awaiting your review'} />
       </section>
 
       <section aria-label="Document filters" className="sd-table-filters sd-document-filters">

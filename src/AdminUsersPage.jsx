@@ -1,12 +1,36 @@
-﻿import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { apiGet, apiPatch } from './api.js'
 import UserAvatar from './UserAvatar.jsx'
 const UserProfileModal = lazy(() => import('./UserProfileModal.jsx'))
-import { apiGet, apiPatch } from './api.js'
 import './AdminUsersPage.css'
 
 const pageSize = 8
-const validStatuses = ['all', 'active', 'disabled', 'pending']
-const titleCase = (value) => value.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase())
+const validStatuses = ['all', 'active', 'disabled', 'pending', 'suspended']
+
+function displayUser(item) {
+  const roles = { ADMIN: 'Admin', MANAGER: 'Manager', EMPLOYEE: 'Employee' }
+  const statuses = { ACTIVE: 'Active', PENDING: 'Pending', DISABLED: 'Disabled', SUSPENDED: 'Suspended' }
+  return {
+    id: item.id,
+    name: item.full_name,
+    email: item.email,
+    role: roles[item.role] || item.role,
+    department: item.department || '—',
+    jobTitle: item.job_title || '',
+    status: statuses[item.account_status] || item.account_status,
+    joined: item.created_at,
+    lastLogin: item.last_login_at,
+  }
+}
+
+function userApiStatus(status) {
+  return { Active: 'ACTIVE', Pending: 'PENDING', Disabled: 'DISABLED', Suspended: 'SUSPENDED' }[status]
+}
+
+function userApiRole(role) {
+  return { Admin: 'ADMIN', Manager: 'MANAGER', Employee: 'EMPLOYEE' }[role]
+}
 
 function Icon({ name, className = '' }) {
   const paths = {
@@ -88,11 +112,13 @@ function SummaryCard({ label, value, detail, tone, icon }) {
 function UserActionDialog({ user, mode, onClose, onSave }) {
   const [form, setForm] = useState({
     name: user.name,
-    email: user.email,
     role: user.role,
     department: user.department,
+    jobTitle: user.jobTitle || '',
     status: user.status,
   })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   useEffect(() => {
     function closeOnEscape(event) {
       if (event.key === 'Escape') onClose()
@@ -103,6 +129,19 @@ function UserActionDialog({ user, mode, onClose, onSave }) {
 
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(form)
+    } catch (saveError) {
+      setError(saveError.message || 'The user could not be updated.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -125,17 +164,18 @@ function UserActionDialog({ user, mode, onClose, onSave }) {
             ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
           </dl>
         ) : (
-          <form className="user-edit-form" onSubmit={(event) => { event.preventDefault(); onSave(form) }}>
+          <form className="user-edit-form" onSubmit={submit}>
             {mode === 'edit' && <>
               <label>Full name<input onChange={(event) => update('name', event.target.value)} required value={form.name} /></label>
-              <label>Email address<input onChange={(event) => update('email', event.target.value)} required type="email" value={form.email} /></label>
               <label>Department<input onChange={(event) => update('department', event.target.value)} required value={form.department} /></label>
-              <label>Account status<select onChange={(event) => update('status', event.target.value)} value={form.status}><option>Active</option><option>Pending</option><option>Disabled</option></select></label>
+              <label>Job title<input onChange={(event) => update('jobTitle', event.target.value)} value={form.jobTitle} /></label>
+              <label>Account status<select onChange={(event) => update('status', event.target.value)} value={form.status}><option>Active</option><option>Pending</option><option>Disabled</option><option>Suspended</option></select></label>
             </>}
             <label>Role<select onChange={(event) => update('role', event.target.value)} value={form.role}><option>Admin</option><option>Manager</option><option>Employee</option></select></label>
+            {error && <p role="alert">{error}</p>}
             <div className="user-action-dialog-footer">
               <button className="user-button-secondary" onClick={onClose} type="button">Cancel</button>
-              <button className="user-button-primary" type="submit">Save changes</button>
+              <button className="user-button-primary" disabled={saving} type="submit">{saving ? 'Saving…' : 'Save changes'}</button>
             </div>
           </form>
         )}
@@ -147,11 +187,11 @@ function UserActionDialog({ user, mode, onClose, onSave }) {
 
 export default function AdminUsersPage({ initialFilter = 'all' }) {
   const [users, setUsers] = useState([])
-  const [summary, setSummary] = useState({ total: 0, active: 0, disabled: 0, pending: 0 })
+  const [summary, setSummary] = useState(null)
   const [totalUsers, setTotalUsers] = useState(0)
   const [pageCount, setPageCount] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
+  const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState(validStatuses.includes(initialFilter) ? initialFilter : 'all')
@@ -164,42 +204,47 @@ export default function AdminUsersPage({ initialFilter = 'all' }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize), sort_by: 'created-desc' })
-    if (search.trim()) params.set('search', search.trim())
-    if (statusFilter !== 'all') params.set('status', statusFilter.toUpperCase())
-    setLoading(true)
-    setLoadError('')
-    Promise.all([
-      apiGet('/api/admin/users?' + params.toString(), { signal: controller.signal }),
-      apiGet('/api/admin/users/summary', { signal: controller.signal }),
-    ])
-      .then(([pageData, summaryData]) => {
-        setUsers(pageData.items.map((user) => ({
-          id: user.id,
-          name: user.full_name,
-          email: user.email,
-          role: titleCase(user.role),
-          department: user.department || '—',
-          status: titleCase(user.account_status),
-          avatarTone: 'blue',
-        })))
+    const delay = window.setTimeout(() => {
+      setLoading(true)
+      setError('')
+      const params = new URLSearchParams({ page: String(page), page_size: String(pageSize), sort_by: 'created-desc' })
+      if (search.trim()) params.set('search', search.trim())
+      if (statusFilter !== 'all') {
+        const status = { active: 'ACTIVE', disabled: 'DISABLED', pending: 'PENDING', suspended: 'SUSPENDED' }[statusFilter]
+        if (status) params.set('status', status)
+      }
+      Promise.all([
+        apiGet(`/api/admin/users?${params.toString()}`, { signal: controller.signal }),
+        apiGet('/api/admin/users/summary', { signal: controller.signal }),
+      ]).then(([pageData, summaryData]) => {
+        setUsers(pageData.items.map(displayUser))
         setTotalUsers(pageData.total)
         setPageCount(Math.max(1, pageData.pages))
-        setSummary({
-          total: summaryData.total_users,
-          active: summaryData.active_users,
-          disabled: summaryData.disabled_users,
-          pending: summaryData.pending_users,
-        })
-      })
-      .catch((error) => {
-        if (error.name !== 'AbortError') setLoadError(error.message || 'Users could not be loaded.')
-      })
-      .finally(() => {
+        setSummary(summaryData)
+      }).catch((requestError) => {
+        if (requestError.name !== 'AbortError') {
+          setUsers([])
+          setTotalUsers(0)
+          setSummary(null)
+          setError(requestError.message || 'Users could not be loaded.')
+        }
+      }).finally(() => {
         if (!controller.signal.aborted) setLoading(false)
       })
-    return () => controller.abort()
-  }, [page, search, statusFilter, refreshKey])
+    }, search ? 250 : 0)
+    return () => {
+      window.clearTimeout(delay)
+      controller.abort()
+    }
+  }, [page, refreshKey, search, statusFilter])
+
+  useEffect(() => {
+    function refreshUsers() {
+      setRefreshKey((value) => value + 1)
+    }
+    window.addEventListener('suredocs:admin-users-updated', refreshUsers)
+    return () => window.removeEventListener('suredocs:admin-users-updated', refreshUsers)
+  }, [])
 
   useEffect(() => {
     if (!openMenuId) return undefined
@@ -241,11 +286,11 @@ export default function AdminUsersPage({ initialFilter = 'all' }) {
     if (action === 'toggle') {
       const accountStatus = user.status === 'Disabled' ? 'ACTIVE' : 'DISABLED'
       try {
-        await apiPatch('/api/admin/users/' + encodeURIComponent(user.id), { account_status: accountStatus })
-        setNotice(user.name + ' was ' + (accountStatus === 'ACTIVE' ? 'enabled' : 'disabled') + '.')
+        await apiPatch(`/api/admin/users/${encodeURIComponent(user.id)}`, { account_status: accountStatus })
+        setNotice(`${user.name}'s account is now ${accountStatus.toLowerCase()}.`)
         setRefreshKey((value) => value + 1)
-      } catch (error) {
-        setNotice(error.message || 'The account status could not be changed.')
+      } catch (requestError) {
+        setNotice(requestError.message || 'The account status could not be changed.')
       }
       return
     }
@@ -254,31 +299,22 @@ export default function AdminUsersPage({ initialFilter = 'all' }) {
 
   async function saveUser(changes) {
     const selected = actionDialog.user
-    if (changes.email.trim().toLowerCase() !== selected.email.toLowerCase()) {
-      setNotice('Email changes require an email verification workflow, which is not configured.')
-      return
-    }
-    const body = {
-      full_name: changes.name,
-      role: changes.role.toUpperCase(),
-      department: changes.department || null,
-      account_status: changes.status.toUpperCase(),
-    }
-    try {
-      await apiPatch('/api/admin/users/' + encodeURIComponent(selected.id), body)
-      setNotice(selected.name + ' was updated.')
-      setActionDialog(null)
-      setRefreshKey((value) => value + 1)
-    } catch (error) {
-      setNotice(error.message || 'The user could not be updated.')
-    }
+    const body = actionDialog.mode === 'role'
+      ? { role: userApiRole(changes.role) }
+      : {
+          full_name: changes.name.trim(),
+          department: changes.department.trim() || null,
+          job_title: changes.jobTitle.trim() || null,
+          role: userApiRole(changes.role),
+          account_status: userApiStatus(changes.status),
+        }
+    await apiPatch(`/api/admin/users/${encodeURIComponent(selected.id)}`, body)
+    setNotice(`${changes.name || selected.name} was updated.`)
+    setActionDialog(null)
+    setRefreshKey((value) => value + 1)
   }
 
   const closeProfile = useCallback(() => setProfileUser(null), [])
-
-  function updateProfileUser(changes) {
-    setProfileUser((current) => current ? { ...current, ...changes } : current)
-  }
 
   function openProfileFromRow(event, user) {
     if (event.target.closest('button, a, input, select')) return
@@ -289,10 +325,10 @@ export default function AdminUsersPage({ initialFilter = 'all' }) {
     <section aria-label="User management" className="user-management-page">
       <FlowingWave />
       <div className="user-summary-grid">
-        <SummaryCard detail="All registered users" icon="users" label="Total Users" tone="total" value={summary.total} />
-        <SummaryCard detail="Currently active" icon="active" label="Active Users" tone="active" value={summary.active} />
-        <SummaryCard detail="Deactivated accounts" icon="disabled" label="Disabled Users" tone="disabled" value={summary.disabled} />
-        <SummaryCard detail="Awaiting activation" icon="pending" label="Pending Users" tone="pending" value={summary.pending} />
+        <SummaryCard detail="All registered users" icon="users" label="Total Users" tone="total" value={summary?.total_users ?? '—'} />
+        <SummaryCard detail="Currently active" icon="active" label="Active Users" tone="active" value={summary?.active_users ?? '—'} />
+        <SummaryCard detail="Deactivated accounts" icon="disabled" label="Disabled Users" tone="disabled" value={summary?.disabled_users ?? '—'} />
+        <SummaryCard detail="Awaiting activation" icon="pending" label="Pending Users" tone="pending" value={summary?.pending_users ?? '—'} />
       </div>
 
       <div className="user-management-controls">
@@ -304,17 +340,20 @@ export default function AdminUsersPage({ initialFilter = 'all' }) {
         <label className="user-status-filter">
           <Icon className="user-control-icon" name="filter" />
           <span className="sr-only">Filter users by status</span>
+          <span aria-hidden="true" className="user-filter-caption">Filter by status</span>
           <select onChange={(event) => changeStatus(event.target.value)} value={statusFilter}>
             <option value="all">All Users</option>
             <option value="active">Active</option>
             <option value="disabled">Disabled</option>
             <option value="pending">Pending</option>
+            <option value="suspended">Suspended</option>
           </select>
           <Icon className="user-filter-chevron" name="chevron" />
         </label>
       </div>
 
-      {(loadError || notice) && <div className="user-action-notice" role="status"><span>{loadError || notice}</span><button aria-label="Dismiss notice" onClick={() => { setNotice(''); setLoadError('') }} type="button"><Icon name="close" /></button></div>}
+      {error && <p className="user-action-notice" role="alert">{error}</p>}
+      {notice && <div className="user-action-notice" role="status"><span>{notice}</span><button aria-label="Dismiss notice" onClick={() => setNotice('')} type="button"><Icon name="close" /></button></div>}
 
       <div className="user-table-shell">
         <div className="user-table-scroll">
@@ -322,9 +361,9 @@ export default function AdminUsersPage({ initialFilter = 'all' }) {
             <colgroup><col className="user-col-name" /><col className="user-col-email" /><col className="user-col-role" /><col className="user-col-department" /><col className="user-col-status" /><col className="user-col-actions" /></colgroup>
             <thead><tr>{['User', 'Email', 'Role', 'Department', 'Account Status', 'Actions'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
             <tbody>
-              {visibleUsers.map((user) => (
+              {!loading && visibleUsers.map((user) => (
                 <tr aria-label={`View profile for ${user.name}`} key={user.id} onClick={(event) => openProfileFromRow(event, user)} onKeyDown={(event) => { if (event.target !== event.currentTarget && event.target.closest('button, a, input, select')) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setProfileUser(user) } }} tabIndex={0}>
-                  <td><span className="user-table-person"><UserAvatar className={'user-management-avatar ' + user.avatarTone} email={user.email} fullName={user.name} /><span>{user.name}</span></span></td>
+                  <td><span className="user-table-person"><UserAvatar className={'user-management-avatar ' + user.avatarTone} email={user.email} fullName={user.name} imageSrc={user.avatarSrc} /><span>{user.name}</span></span></td>
                   <td className="user-table-email" title={user.email}>{user.email}</td>
                   <td><span className={'user-role-badge ' + user.role.toLowerCase()}>{user.role}</span></td>
                   <td className="user-table-department">{user.department}</td>
@@ -342,7 +381,8 @@ export default function AdminUsersPage({ initialFilter = 'all' }) {
                   </td>
                 </tr>
               ))}
-              {visibleUsers.length === 0 && <tr><td className="user-empty-state" colSpan={6}>{loading ? 'Loading users…' : 'No users match your search or status filter.'}</td></tr>}
+              {loading && <tr><td className="user-empty-state" colSpan={6}>Loading users…</td></tr>}
+              {!loading && visibleUsers.length === 0 && <tr><td className="user-empty-state" colSpan={6}>No users match your search or status filter.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -350,14 +390,14 @@ export default function AdminUsersPage({ initialFilter = 'all' }) {
           <p>Showing {start}–{end} of {totalUsers} users</p>
           <nav aria-label="User pages" className="user-pagination">
             <button aria-label="Previous page" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button"><Icon name="previous" /></button>
-            {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <button aria-current={currentPage === pageNumber ? 'page' : undefined} className={currentPage === pageNumber ? 'current-page' : ''} key={pageNumber} onClick={() => setPage(pageNumber)} type="button">{pageNumber}</button>)}
+            {Array.from({ length: Math.min(pageCount, 5) }, (_, index) => Math.max(1, Math.min(currentPage - 2, pageCount - 4)) + index).map((pageNumber) => <button aria-current={currentPage === pageNumber ? 'page' : undefined} className={currentPage === pageNumber ? 'current-page' : ''} key={pageNumber} onClick={() => setPage(pageNumber)} type="button">{pageNumber}</button>)}
             <button aria-label="Next page" disabled={currentPage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} type="button"><Icon name="next" /></button>
           </nav>
         </footer>
       </div>
 
-      {actionDialog && <UserActionDialog mode={actionDialog.mode} onClose={() => setActionDialog(null)} onSave={saveUser} user={users.find((user) => user.id === actionDialog.user.id) ?? actionDialog.user} />}
-      {profileUser && <Suspense fallback={<div className="user-profile-loading-backdrop" role="status">Opening user profile…</div>}><UserProfileModal key={profileUser.id} user={users.find((user) => user.id === profileUser.id) ?? profileUser} onClose={closeProfile} onUserUpdate={updateProfileUser} /></Suspense>}
+      {actionDialog && createPortal(<UserActionDialog mode={actionDialog.mode} onClose={() => setActionDialog(null)} onSave={saveUser} user={users.find((user) => user.id === actionDialog.user.id) ?? actionDialog.user} />, document.body)}
+      {profileUser && <Suspense fallback={createPortal(<div className="user-profile-loading-backdrop" role="status">Opening user profile…</div>, document.body)}><UserProfileModal key={profileUser.id} user={users.find((user) => user.id === profileUser.id) ?? profileUser} onClose={closeProfile} onUserUpdate={() => setRefreshKey((value) => value + 1)} /></Suspense>}
     </section>
   )
 }

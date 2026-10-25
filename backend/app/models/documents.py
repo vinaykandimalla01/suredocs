@@ -108,6 +108,9 @@ class Document(Base):
     audit_logs: Mapped[list[DocumentAuditLog]] = relationship(
         "DocumentAuditLog", back_populates="document",
     )
+    scans: Mapped[list[DocumentScan]] = relationship(
+        "DocumentScan", back_populates="document", cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         CheckConstraint("length(btrim(title)) > 0", name="ck_documents_title_nonempty"),
@@ -185,6 +188,9 @@ class DocumentVersion(Base):
         "User", back_populates="uploaded_document_versions",
         foreign_keys=[uploaded_by_user_id],
     )
+    scans: Mapped[list[DocumentScan]] = relationship(
+        "DocumentScan", back_populates="version", cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         UniqueConstraint("document_id", "version_number", name="uq_document_versions_document_number"),
@@ -250,6 +256,9 @@ class DocumentPermission(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    revocation_reason: Mapped[str | None] = mapped_column(
+        String(500), nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(),
@@ -323,11 +332,18 @@ class DocumentAuditLog(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    actor_user_id_snapshot: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    actor_name_snapshot: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    actor_email_snapshot: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    actor_role_snapshot: Mapped[str | None] = mapped_column(String(20), nullable=True)
     target_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    target_user_id_snapshot: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    target_name_snapshot: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    target_email_snapshot: Mapped[str | None] = mapped_column(String(320), nullable=True)
     action_type: Mapped[str] = mapped_column(String(50), nullable=False)
     result: Mapped[str] = mapped_column(String(20), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
@@ -360,7 +376,7 @@ class DocumentAuditLog(Base):
             "'DOCUMENT_DOWNLOADED', 'DOCUMENT_METADATA_UPDATED', "
             "'DOCUMENT_VERSION_CREATED', 'DOCUMENT_DELETED', "
             "'DOCUMENT_RESTORED', 'DOCUMENT_SCAN_COMPLETED', "
-            "'PERMISSION_GRANTED', 'PERMISSION_REVOKED', "
+            "'PERMISSION_GRANTED', 'PERMISSION_MODIFIED', 'PERMISSION_REVOKED', "
             "'UPLOAD_REJECTED', 'ACCESS_DENIED', 'ACCESS_REQUEST_SUBMITTED', "
             "'ACCESS_REQUEST_APPROVED', 'ACCESS_REQUEST_DENIED', "
             "'ACCESS_REQUEST_CANCELLED')",
@@ -389,4 +405,66 @@ class DocumentAuditLog(Base):
             "action_type",
             occurred_at.desc(),
         ),
+    )
+
+
+class DocumentScan(Base):
+    __tablename__ = "document_scans"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_versions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    scan_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="PENDING_SCAN",
+        server_default=text("'PENDING_SCAN'"),
+    )
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_hash_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    scanner_name: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="ClamAV", server_default=text("'ClamAV'"),
+    )
+    scanner_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    detection_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"),
+    )
+    scan_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    scan_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+    document: Mapped[Document] = relationship("Document", back_populates="scans")
+    version: Mapped[DocumentVersion | None] = relationship("DocumentVersion", back_populates="scans")
+
+    __table_args__ = (
+        CheckConstraint(
+            "scan_status IN ('PENDING_SCAN', 'SCANNING', 'CLEAN', 'INFECTED', 'SCAN_FAILED')",
+            name="ck_document_scans_status",
+        ),
+        Index("ix_document_scans_document_id", "document_id"),
+        Index("ix_document_scans_version_id", "version_id"),
+        Index("ix_document_scans_status", "scan_status"),
+        Index("ix_document_scans_created_at", created_at.desc()),
     )

@@ -88,6 +88,14 @@ function DocumentUploadForm({ onCancel, onUploaded }) {
       const savedDocument = await apiUpload('/api/documents/upload', body, {
         onProgress: setProgress,
       })
+      if (savedDocument.latest_uploaded_version_status === 'QUARANTINED') {
+        setError(savedDocument.scan_message || 'Upload blocked: the file failed the security scan.')
+        return
+      }
+      if (savedDocument.latest_uploaded_version_status === 'PENDING_SCAN' || savedDocument.latest_uploaded_version_status === 'FAILED') {
+        setError(savedDocument.scan_message || 'Security scanning is temporarily unavailable. Please try again later.')
+        return
+      }
       onUploaded(savedDocument)
     } catch (requestError) {
       setError(requestError.message || 'The document upload failed.')
@@ -146,11 +154,11 @@ function DocumentUploadForm({ onCancel, onUploaded }) {
             <div className="h-2 overflow-hidden rounded bg-slate-100">
               <div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} />
             </div>
-            <p className="text-xs text-slate-500">Uploading: {progress}%</p>
+            <p className="text-xs text-slate-500">{progress === 100 ? 'Scanning for malware…' : `Uploading: ${progress}%`}</p>
           </div>
         )}
         {error && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{error}</p>}
-        <div className="flex justify-end"><PrimaryButton disabled={busy || !file} type="submit">{busy ? 'Uploading…' : 'Upload document'}</PrimaryButton></div>
+        <div className="flex justify-end"><PrimaryButton disabled={busy || !file} type="submit">{busy ? (progress === 100 ? 'Scanning for malware…' : 'Uploading…') : 'Upload document'}</PrimaryButton></div>
       </form>
     </section>
   )
@@ -455,7 +463,11 @@ function LegacyDocumentsWorkspace({
   function onUploaded(document) {
     setUploading(false)
     setLocalSelectedId(document.id)
-    setNotice('Document uploaded successfully.')
+    setNotice(
+      document.latest_uploaded_version_status === 'AVAILABLE'
+        ? 'Document uploaded and security scan passed.'
+        : `Document saved; security scan is ${document.latest_uploaded_version_status || 'pending'}.`
+    )
     setRefreshKey((value) => value + 1)
   }
 
@@ -487,9 +499,17 @@ function LegacyDocumentsWorkspace({
       const updated = await apiUpload(`/api/documents/${selected.id}/versions`, body, {
         onProgress: setReplacementProgress,
       })
+      if (updated.latest_uploaded_version_status === 'QUARANTINED') {
+        setError(updated.scan_message || 'Upload blocked: the file failed the security scan.')
+        return
+      }
+      if (updated.latest_uploaded_version_status === 'PENDING_SCAN' || updated.latest_uploaded_version_status === 'FAILED') {
+        setError(updated.scan_message || 'Security scanning is temporarily unavailable. Please try again later.')
+        return
+      }
       setReplacementFile(null)
       setDocuments((items) => items.map((item) => item.id === updated.id ? updated : item))
-      setNotice('A new document version was uploaded.')
+      setNotice('A new document version was uploaded and security scan passed.')
     } catch (requestError) {
       setError(requestError.message || 'The replacement upload failed.')
     } finally {

@@ -1,0 +1,656 @@
+/* SureDocs - Admin Permission Document Modal Styling */
+
+.doc-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  padding: 16px;
+}
+
+.doc-modal-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1240px;
+  max-height: 94vh;
+  background-color: #FFFFFF;
+  border-radius: 14px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+  overflow: hidden;
+  font-family: inherit;
+  color: #172033;
+}
+
+/* Modal Header */
+.doc-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  flex-shrink: 0;
+}
+
+.doc-modal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.doc-modal-file-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.doc-modal-file-icon.pdf { background: #EF4444; }
+.doc-modal-file-icon.docx { background: #2563EB; }
+.doc-modal-file-icon.xlsx { background: #10B981; }
+.doc-modal-file-icon.pptx { background: #F97316; }
+.doc-modal-file-icon.file { background: #64748B; }
+
+.doc-modal-title-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.doc-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 0;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-modal-subtitle {
+  font-size: 11px;
+  color: #64748B;
+  margin-top: 2px;
+}
+
+.doc-modal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.doc-modal-close-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #64748B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.doc-modal-close-btn:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+/* Modal Body Grid */
+.doc-modal-body {
+  display: grid;
+  grid-template-columns: 1.8fr 1.1fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 980px) {
+  .doc-modal-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+}
+
+.doc-modal-col-left {
+  padding: 16px 20px;
+  overflow-y: auto;
+  border-right: 1px solid #E2E8F0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.doc-modal-col-right {
+  padding: 16px 20px;
+  overflow-y: auto;
+  background: #FAFAFC;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Document Owner Card (Pale Blue Card) */
+.doc-owner-card {
+  background: #EFF6FF;
+  border: 1px solid #DBEAFE;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.doc-owner-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.doc-owner-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1E3A8A;
+}
+
+.doc-owner-badge {
+  background: #DBEAFE;
+  color: #1D4ED8;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.doc-owner-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.doc-owner-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.doc-owner-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #3B82F6;
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.doc-owner-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0F172A;
+  line-height: 1.2;
+}
+
+.doc-owner-meta-text {
+  font-size: 11px;
+  color: #475569;
+  margin-top: 1px;
+}
+
+.doc-owner-stats-grid {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 11px;
+}
+
+.doc-owner-stat-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-owner-stat-label {
+  color: #64748B;
+  font-size: 10px;
+}
+
+.doc-owner-stat-val {
+  color: #0F172A;
+  font-weight: 600;
+  margin-top: 1px;
+}
+
+/* Document Details Card */
+.doc-details-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.doc-details-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0F172A;
+  margin-bottom: 10px;
+}
+
+.doc-details-content-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .doc-details-content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.doc-details-file-block {
+  display: flex;
+  gap: 10px;
+}
+
+.doc-details-file-icon {
+  width: 40px;
+  height: 48px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.doc-details-meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.doc-details-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.doc-details-label {
+  color: #64748B;
+  white-space: nowrap;
+}
+
+.doc-details-val {
+  color: #0F172A;
+  font-weight: 500;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-details-desc-box {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #F1F5F9;
+  font-size: 11px;
+  color: #475569;
+}
+
+/* Tabs */
+.doc-modal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid #E2E8F0;
+  padding-bottom: 2px;
+}
+
+.doc-modal-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px 8px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748B;
+  cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+}
+
+.doc-modal-tab-btn:hover {
+  color: #0F172A;
+}
+
+.doc-modal-tab-btn.active {
+  color: #1769F5;
+  font-weight: 600;
+}
+
+.doc-modal-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #1769F5;
+  border-radius: 2px;
+}
+
+/* Shared Users Section */
+.doc-shared-users-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.doc-shared-users-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.doc-shared-users-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.doc-shared-users-sub {
+  font-size: 11px;
+  color: #64748B;
+}
+
+.doc-shared-table-wrap {
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: #FFFFFF;
+}
+
+.doc-shared-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  text-align: left;
+}
+
+.doc-shared-table th {
+  padding: 8px 10px;
+  background: #F8FAFC;
+  border-bottom: 1px solid #E2E8F0;
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748B;
+  white-space: nowrap;
+}
+
+.doc-shared-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #F1F5F9;
+  vertical-align: middle;
+}
+
+.doc-shared-table tr:hover {
+  background: #F8FAFC;
+}
+
+.doc-shared-table tr.selected-row {
+  background: #EFF6FF;
+}
+
+/* Right Column: Permission Management Panel */
+.doc-pm-panel-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.doc-pm-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0F172A;
+  line-height: 1.2;
+}
+
+.doc-pm-subtitle {
+  font-size: 11px;
+  color: #64748B;
+  margin-top: 2px;
+}
+
+/* Current Permission Overview Mini Cards */
+.doc-pm-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.doc-pm-mini-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.doc-pm-mini-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.doc-pm-mini-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0F172A;
+  line-height: 1;
+}
+
+.doc-pm-mini-label {
+  font-size: 10px;
+  color: #64748B;
+}
+
+/* Add / Revoke User Access Form */
+.doc-pm-section-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.doc-pm-sec-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.doc-pm-input-field {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  font-size: 11px;
+  color: #0F172A;
+}
+
+.doc-pm-input-field:focus {
+  outline: none;
+  border-color: #1769F5;
+}
+
+.doc-pm-btn-grant {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  border-radius: 7px;
+  background: #1769F5;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.doc-pm-btn-grant:hover:not(:disabled) {
+  background: #1257CE;
+}
+
+.doc-pm-btn-grant:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Selected User Permission Card */
+.doc-pm-selected-user-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-pm-user-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.doc-pm-user-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.doc-pm-user-details-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #F1F5F9;
+}
+
+.doc-pm-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.doc-pm-detail-key {
+  color: #64748B;
+}
+
+.doc-pm-detail-val {
+  color: #0F172A;
+  font-weight: 500;
+}
+
+/* Revoke Permission Card (Red Accent) */
+.doc-pm-revoke-card {
+  background: #FEF2F2;
+  border: 1px solid #FEE2E2;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-pm-revoke-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #991B1B;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.doc-pm-revoke-warning-text {
+  font-size: 10px;
+  color: #B91C1C;
+  line-height: 1.3;
+}
+
+.doc-pm-revoke-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid #FECACA;
+  background: #FFFFFF;
+  font-size: 11px;
+  color: #7F1D1D;
+}
+
+.doc-pm-revoke-btn {
+  height: 32px;
+  border-radius: 6px;
+  background: #EF4444;
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.doc-pm-revoke-btn:hover:not(:disabled) {
+  background: #DC2626;
+}
+
+.doc-pm-revoke-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

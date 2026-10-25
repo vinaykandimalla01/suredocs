@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost } from './api.js'
 import AdminPermissionDocumentModal from './AdminPermissionDocumentModal.jsx'
+import AdminPermissionsWorkspace from './AdminPermissionsWorkspace.jsx'
 import AdminDashboardHome from './AdminDashboardHome.jsx'
 import AdminAuditLogs from './AdminAuditLogs.jsx'
 import AdminSecurityMonitoring from './AdminSecurityMonitoring.jsx'
@@ -14,8 +15,14 @@ const navItems = [
   { label: 'Documents', href: '/admin/documents', icon: 'documents' },
   { label: 'Permissions', href: '/admin/permissions', icon: 'permissions' },
   { label: 'Audit Logs', href: '/admin/audit', icon: 'audit' },
-  { label: 'Reports', href: '/admin/reports', icon: 'reports' },
-  { label: 'Settings', href: '/admin/settings', icon: 'settings' },
+  { label: 'Security Monitoring', href: '/admin/security', icon: 'security' },
+]
+
+const userManagementNavItems = [
+  { label: 'Dashboard', href: '/admin', icon: 'dashboard' },
+  { label: 'User Management', href: '/admin/users', icon: 'users' },
+  { label: 'Documents', href: '/admin/documents', icon: 'documents' },
+  { label: 'Audit Logs', href: '/admin/audit', icon: 'audit' },
 ]
 
 const userFirstNames = [
@@ -75,7 +82,7 @@ function loadMockUsers() {
   return users
 }
 
-const inviteRoles = ['Administrator', 'Employee']
+const inviteRoles = ['Administrator', 'Manager', 'Employee']
 const initialRecentActivities = [
   {
     title: 'Successful sign-in',
@@ -183,19 +190,6 @@ function generateTemporaryPassword(existingPasswords = []) {
   return password
 }
 
-function createUsername(firstName, lastName) {
-  const normalize = (value) =>
-    value
-      .normalize('NFKD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '')
-
-  const first = normalize(firstName)
-  const last = normalize(lastName)
-  return first && last ? `${first}.${last}` : first || last
-}
-
 function Icon({ name, className = 'h-5 w-5' }) {
   const paths = {
     dashboard: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
@@ -259,17 +253,41 @@ function BrandMark() {
   )
 }
 
-function Sidebar({ pathname, user, mobileOpen, onClose }) {
+function Sidebar({ pathname, user, mobileOpen, onClose, collapsed, onToggleCollapse }) {
   const [profileOpen, setProfileOpen] = useState(false)
   const displayName = user?.full_name || 'Administrator'
   const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
   const displayRole = user?.job_title || (user?.role === 'ADMIN' ? 'Administrator' : 'Employee')
+  const isPermissions = pathname.startsWith('/admin/permissions')
+  const mainItems = navItems.filter((item) => item.label !== 'Settings')
+  const settingsItem = navItems.find((item) => item.label === 'Settings')
 
   return (
-    <aside className={`admin-sidebar${mobileOpen ? ' is-open' : ''}`}>
-      <BrandMark />
+    <aside className={`admin-sidebar${mobileOpen ? ' is-open' : ''}${collapsed ? ' collapsed' : ''}`}>
+      <div className="admin-sidebar-header">
+        <div className="sidebar-brand">
+          <svg aria-hidden="true" className="sidebar-brand-shield" viewBox="0 0 24 26">
+            <path d="M12 1 22 5v7c0 6.2-4.3 10.5-10 13C6.3 22.5 2 18.2 2 12V5l10-4Z" fill="currentColor"/>
+            <path d="m7.3 12.8 3.1 3.1 6.5-6.6" fill="none" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+          </svg>
+          {!collapsed && <span className="sidebar-brand-text">SureDocs</span>}
+        </div>
+        <button
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="admin-sidebar-toggle-btn"
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            onToggleCollapse?.()
+          }}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          type="button"
+        >
+          <Icon className="h-4 w-4" name="menu" />
+        </button>
+      </div>
       <nav aria-label="Administrator navigation" className="admin-sidebar-nav">
-        {navItems.map((item) => {
+        {mainItems.map((item) => {
           const selected =
             item.href === '/admin'
               ? pathname === '/admin'
@@ -278,30 +296,60 @@ function Sidebar({ pathname, user, mobileOpen, onClose }) {
           return (
             <a
               aria-current={selected ? 'page' : undefined}
+              aria-label={item.label}
               className={`admin-sidebar-link${selected ? ' selected' : ''}`}
               href={item.href}
-              onClick={onClose}
               key={item.href}
+              onClick={onClose}
+              title={collapsed ? item.label : undefined}
             >
               <Icon className="sidebar-link-icon" name={item.icon} />
-              {item.label}
+              {!collapsed && <span className="sidebar-link-text">{item.label}</span>}
             </a>
           )
         })}
       </nav>
-      <div className="sidebar-profile-wrap">
-        <button aria-expanded={profileOpen} className="sidebar-profile-button" onClick={() => setProfileOpen((value) => !value)} type="button">
-          <span className="sidebar-avatar">{initials || 'A'}</span>
-          <span className="sidebar-profile-copy"><b>{displayName}</b><small>{displayRole}</small></span>
-          <Icon className="sidebar-profile-chevron" name="chevron" />
-        </button>
-        {profileOpen && <div className="sidebar-profile-menu"><span>{displayName}</span><small>{user?.email || displayRole}</small><a href="/">Sign out</a></div>}
-      </div>
+      {settingsItem && (
+        <div className="admin-sidebar-settings-wrap">
+          <a
+            aria-current={pathname.startsWith(settingsItem.href) ? 'page' : undefined}
+            aria-label={settingsItem.label}
+            className={`admin-sidebar-link${pathname.startsWith(settingsItem.href) ? ' selected' : ''}`}
+            href={settingsItem.href}
+            onClick={onClose}
+            title={collapsed ? settingsItem.label : undefined}
+          >
+            <Icon className="sidebar-link-icon" name={settingsItem.icon} />
+            {!collapsed && <span className="sidebar-link-text">{settingsItem.label}</span>}
+          </a>
+        </div>
+      )}
+      {!isPermissions && (
+        <div className="sidebar-profile-wrap">
+          <button
+            aria-expanded={profileOpen}
+            aria-label={displayName}
+            className="sidebar-profile-button"
+            onClick={() => setProfileOpen((value) => !value)}
+            title={collapsed ? displayName : undefined}
+            type="button"
+          >
+            <span className="sidebar-avatar">{initials || 'A'}</span>
+            {!collapsed && (
+              <>
+                <span className="sidebar-profile-copy"><b>{displayName}</b><small>{displayRole}</small></span>
+                <Icon className="sidebar-profile-chevron" name="chevron" />
+              </>
+            )}
+          </button>
+          {profileOpen && <div className="sidebar-profile-menu"><span>{displayName}</span><small>{user?.email || displayRole}</small><a href="/">Sign out</a></div>}
+        </div>
+      )}
     </aside>
   )
 }
 
-function TopBar({ user, onMenuClick, userManagement = false, securityMonitoring = false, securitySearch = '', onSecuritySearch }) {
+function TopBar({ user, onMenuClick, userManagement = false, permissions = false, securityMonitoring = false, securitySearch = '', onSecuritySearch }) {
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef(null)
   const displayName = user?.full_name || 'Administrator'
@@ -326,11 +374,31 @@ function TopBar({ user, onMenuClick, userManagement = false, securityMonitoring 
   return (
     <header className="admin-topbar">
       <button aria-label="Open navigation menu" className="admin-topbar-menu" onClick={onMenuClick} type="button"><Icon className="h-4 w-4" name="menu" /></button>
-      <div className="admin-topbar-spacer" />
+      {permissions ? (
+        <div className="admin-permissions-topbar-search">
+          <Icon className="h-3.5 w-3.5 text-slate-400" name="search" />
+          <input
+            aria-label="Search documents, users, permissions"
+            placeholder="Search documents, users, permissions..."
+            type="search"
+          />
+        </div>
+      ) : (
+        <div className="admin-topbar-spacer" />
+      )}
       <div className="admin-topbar-actions">
         {securityMonitoring && <label className="admin-security-search"><Icon className="h-3.5 w-3.5" name="search" /><span className="sr-only">Search security events</span><input aria-label="Search security events" onChange={(event) => onSecuritySearch(event.target.value)} placeholder="Search logs, users, documents..." type="search" value={securitySearch} /></label>}
-        {securityMonitoring && <button aria-label="Notifications" className="admin-topbar-bell" type="button"><Icon className="h-4 w-4" name="bell" /><span /></button>}
-        {userManagement || securityMonitoring ? (
+        {(permissions || securityMonitoring || userManagement) && <button aria-label="Notifications" className="admin-topbar-bell" type="button"><Icon className="h-4 w-4" name="bell" /><span className="admin-topbar-bell-badge" /></button>}
+        {permissions ? (
+          <div className="admin-user-profile" ref={profileRef}>
+            <button aria-expanded={profileOpen} aria-label="Admin profile menu" className="admin-permissions-profile-button" onClick={() => setProfileOpen((value) => !value)} type="button">
+              <span className="admin-permissions-avatar-badge">A</span>
+              <span className="admin-permissions-admin-label">Admin</span>
+              <Icon className="h-3 w-3 text-slate-500" name="chevron" />
+            </button>
+            {profileOpen && <div className="admin-user-profile-menu"><b>{displayName}</b><small>{user?.email || displayRole}</small><a href="/">Sign out</a></div>}
+          </div>
+        ) : userManagement || securityMonitoring ? (
           <div className="admin-user-profile" ref={profileRef}>
             <button aria-expanded={profileOpen} aria-label="Admin profile menu" className="admin-user-profile-button" onClick={() => setProfileOpen((value) => !value)} type="button">
               <UserAvatar className="admin-profile-avatar" email={user?.email} fullName={user?.full_name} />
@@ -370,6 +438,10 @@ const sectionDetails = {
     title: 'Storage',
     description: 'Review platform storage usage and capacity.',
   },
+  '/admin/platform-health': {
+    title: 'Platform Health',
+    description: 'Platform health monitoring is not available in this preview.',
+  },
   '/admin/permissions': {
     title: 'Permissions',
     description: 'Manage document access rules and sharing permissions.',
@@ -399,12 +471,12 @@ export function CreateUserModal({ onClose, onCreate, passwords }) {
     email: '',
     role: '',
     department: '',
-    username: '',
   })
-  const [usernameEdited, setUsernameEdited] = useState(false)
   const [password, setPassword] = useState(() => generateTemporaryPassword(passwords))
   const [requirePasswordChange, setRequirePasswordChange] = useState(true)
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [created, setCreated] = useState(false)
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -416,24 +488,13 @@ export function CreateUserModal({ onClose, onCreate, passwords }) {
   }, [onClose])
 
   function updateName(field, value) {
-    setForm((current) => {
-      const next = { ...current, [field]: value }
-      if (!usernameEdited) {
-        next.username = createUsername(
-          field === 'firstName' ? value : next.firstName,
-          field === 'lastName' ? value : next.lastName,
-        )
-      }
-      return next
-    })
+    setForm((current) => ({ ...current, [field]: value }))
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault()
-    const normalizedUsername = form.username.trim()
-
     if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim() ||
-      !form.role || !form.department || !normalizedUsername || !password) {
+      !form.role || !form.department || !password) {
       setError('Complete every field before creating the invitation.')
       return
     }
@@ -442,16 +503,24 @@ export function CreateUserModal({ onClose, onCreate, passwords }) {
       return
     }
 
-    const creationError = onCreate({
-      ...form,
-      firstName: form.firstName.trim(),
-      lastName: form.lastName.trim(),
-      email: form.email.trim(),
-      username: normalizedUsername,
-      password,
-      requirePasswordChange,
-    })
-    if (creationError) setError(creationError)
+    setSaving(true)
+    setError('')
+    try {
+      const creationError = await onCreate({
+        ...form,
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        email: form.email.trim(),
+        password,
+        requirePasswordChange,
+      })
+      if (creationError) setError(creationError)
+      else setCreated(true)
+    } catch (creationFailure) {
+      setError(creationFailure.message || 'The account could not be created.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const inputClass =
@@ -481,7 +550,7 @@ export function CreateUserModal({ onClose, onCreate, passwords }) {
                 Create / Invite User
               </h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                Add a new account or prepare an email invitation.
+                Create a pending account in SureDocs. The current system does not send invitation emails.
               </p>
             </div>
           </div>
@@ -563,20 +632,6 @@ export function CreateUserModal({ onClose, onCreate, passwords }) {
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label>
-              <span className={labelClass}>Username</span>
-              <input
-                autoComplete="username"
-                className={inputClass}
-                onChange={(event) => {
-                  setUsernameEdited(true)
-                  setForm((current) => ({ ...current, username: event.target.value }))
-                }}
-                placeholder="Generated from first and last name"
-                required
-                value={form.username}
-              />
-            </label>
             <div>
               <span className={labelClass}>Temporary password</span>
               <div className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 pl-3">
@@ -615,9 +670,9 @@ export function CreateUserModal({ onClose, onCreate, passwords }) {
                 type="radio"
               />
               <span>
-                <span className="block text-xs font-semibold text-slate-800">Send email invitation</span>
+                  <span className="block text-xs font-semibold text-slate-800">Email invitation preview</span>
                 <span className="mt-1 block text-[11px] text-slate-500">
-                  Invitation is selected. Email delivery will be available when the backend is connected.
+                  This creates a pending account record; email delivery is not configured.
                 </span>
               </span>
             </label>
@@ -637,6 +692,7 @@ export function CreateUserModal({ onClose, onCreate, passwords }) {
           </label>
 
           {error && <p className="text-xs text-red-700" role="alert">{error}</p>}
+          {created && <p className="text-xs text-emerald-700" role="status">Account created as pending. Use an approved secure channel to provide the displayed temporary password; no invitation email was sent.</p>}
 
           <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
             <button
@@ -647,11 +703,12 @@ export function CreateUserModal({ onClose, onCreate, passwords }) {
               Cancel
             </button>
             <button
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 disabled:cursor-wait disabled:opacity-60"
+              disabled={saving || created}
               type="submit"
             >
               <Icon className="h-4 w-4" name="arrow" />
-              Create / Invite User
+              {saving ? 'Creating account…' : created ? 'Account created' : 'Create account'}
             </button>
           </div>
         </form>
@@ -2031,7 +2088,7 @@ function SectionPlaceholder({ pathname }) {
 }
 
 export default function AdminDashboard({ user }) {
-  const pathname = window.location.pathname.replace(/\/$/, '') || '/admin'
+  const [pathname, setPathname] = useState(() => window.location.pathname.replace(/\/$/, '') || '/admin')
   const isDashboard = pathname === '/admin' || pathname === '/admin/index.html'
   const isUserManagement = pathname.startsWith('/admin/users')
   const isDocuments = pathname.startsWith('/admin/documents')
@@ -2040,29 +2097,39 @@ export default function AdminDashboard({ user }) {
   const isSecurity = pathname.startsWith('/admin/security')
   const [createOpen, setCreateOpen] = useState(false)
   const [createdNotice, setCreatedNotice] = useState('')
-  const [refreshKey, setRefreshKey] = useState(0)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [securitySearch, setSecuritySearch] = useState('')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+
+  useEffect(() => {
+    function handleLocationSync() {
+      setPathname(window.location.pathname.replace(/\/$/, '') || '/admin')
+    }
+    window.addEventListener('popstate', handleLocationSync)
+    window.addEventListener('suredocs:navigate', handleLocationSync)
+    return () => {
+      window.removeEventListener('popstate', handleLocationSync)
+      window.removeEventListener('suredocs:navigate', handleLocationSync)
+    }
+  }, [])
 
   async function handleCreateUser(invitation) {
     try {
-      const payload = {
+      const role = { Administrator: 'ADMIN', Manager: 'MANAGER', Employee: 'EMPLOYEE' }[invitation.role]
+      const created = await apiPost('/api/admin/users', {
         first_name: invitation.firstName,
         last_name: invitation.lastName,
         email: invitation.email,
-        role: invitation.role === 'Administrator' ? 'ADMIN' : 'EMPLOYEE',
+        role,
         department: invitation.department,
-        username: invitation.username,
         password: invitation.password,
         require_password_change: invitation.requirePasswordChange,
-      }
-      await apiPost('/api/admin/users', payload)
-      setCreatedNotice(`Created ${invitation.firstName} ${invitation.lastName} as an invited account.`)
-      setCreateOpen(false)
-      setRefreshKey((k) => k + 1)
+      })
+      setCreatedNotice(`${created.full_name} was created as a pending account. Invitation email delivery is not configured.`)
+      window.dispatchEvent(new Event('suredocs:admin-users-updated'))
       return ''
-    } catch (requestError) {
-      return requestError.message || 'Failed to create user.'
+    } catch (error) {
+      return error.message || 'The account could not be created.'
     }
   }
   const [selectedDocumentId, setSelectedDocumentId] = useState(() => {
@@ -2140,12 +2207,29 @@ export default function AdminDashboard({ user }) {
   }
 
   return (
-    <div className={`admin-app${isDashboard ? ' admin-app-home' : ''}${isUserManagement ? ' admin-app-user-management' : ''}${isSecurity ? ' admin-app-security' : ''}`}>
+    <div className={`admin-app${isDashboard ? ' admin-app-home' : ''}${isUserManagement ? ' admin-app-user-management' : ''}${isSecurity ? ' admin-app-security' : ''}${isPermissions ? ' admin-app-permissions' : ''}${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
       {mobileNavOpen && <button aria-label="Close navigation menu" className="admin-mobile-scrim" onClick={() => setMobileNavOpen(false)} type="button" />}
-      <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} pathname={pathname} user={user} />
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        mobileOpen={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        pathname={pathname}
+        user={user}
+      />
       <div className="admin-page-column">
-        {!isDashboard && <TopBar onMenuClick={() => setMobileNavOpen(true)} user={user} userManagement={isUserManagement} securityMonitoring={isSecurity} securitySearch={securitySearch} onSecuritySearch={setSecuritySearch} />}
-        <main className={`${isDashboard ? 'admin-dashboard-main' : 'admin-content'}${isUserManagement ? ' admin-user-page' : ''}`}>
+        {!isDashboard && (
+          <TopBar
+            onMenuClick={() => setMobileNavOpen(true)}
+            user={user}
+            userManagement={isUserManagement}
+            permissions={isPermissions}
+            securityMonitoring={isSecurity}
+            securitySearch={securitySearch}
+            onSecuritySearch={setSecuritySearch}
+          />
+        )}
+        <main className={`${isDashboard ? 'admin-dashboard-main' : 'admin-content'}${isUserManagement ? ' admin-user-page' : ''}${isPermissions ? ' admin-permissions-page' : ''}`}>
           {!isDashboard && !isDocuments && !isPermissions && !isAudit && !isSecurity && <div className={`mb-5 flex flex-wrap items-end justify-between gap-3${isUserManagement ? ' admin-user-heading' : ''}`}>
             <div>
               {!isUserManagement && (
@@ -2195,7 +2279,6 @@ export default function AdminDashboard({ user }) {
               initialFilter={
                 new URLSearchParams(window.location.search).get('filter') ?? 'all'
               }
-              refreshKey={refreshKey}
             />
           ) : isDocuments ? (
             <AdminDocumentsWorkspace
@@ -2204,10 +2287,8 @@ export default function AdminDashboard({ user }) {
               onOpenDocument={openDocument}
             />
           ) : isPermissions ? (
-            <PermissionsManagement
-              initialPermissionId={selectedPermissionId}
-              onClosePermission={closePermission}
-              onOpenPermission={openPermission}
+            <AdminPermissionsWorkspace
+              onOpenDocument={openDocument}
             />
           ) : isAudit ? (
             <AuditLogs

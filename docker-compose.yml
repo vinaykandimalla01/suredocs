@@ -35,6 +35,9 @@ services:
     security_opt:
       - no-new-privileges:true
 
+    networks:
+      - suredocs_internal
+
   pgadmin:
     image: dpage/pgadmin4:9.18.0
     restart: unless-stopped
@@ -54,6 +57,9 @@ services:
 
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+
+    networks:
+      - suredocs_internal
 
     security_opt:
       - no-new-privileges:true
@@ -75,6 +81,26 @@ services:
     volumes:
       - clamav_data:/var/lib/clamav
 
+    networks:
+      - suredocs_internal
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - clamdcheck.sh
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+
     security_opt:
       - no-new-privileges:true
 
@@ -94,3 +120,8 @@ secrets:
 
   pgadmin_password:
     file: ./secrets/pgadmin_password.txt
+
+networks:
+  suredocs_internal:
+    name: suredocs_internal
+    driver: bridge

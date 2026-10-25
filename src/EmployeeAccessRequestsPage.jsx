@@ -30,7 +30,7 @@ function FileBadge({ type }) {
 
 function MetricCard({ type, number, title, detail }) {
   return <article className={`ear-metric ear-metric--${type}`}>
-    <span className="ear-metric-icon"><RequestIcon name={{ pending: 'clock', approved: 'check', denied: 'deny', total: 'users' }[type]} /></span>
+    <span className="ear-metric-icon"><RequestIcon name={{ pending: 'clock', approved: 'users', denied: 'deny' }[type]} /></span>
     <span className="ear-metric-copy"><strong>{number}</strong><b>{title}</b><small>{detail}</small></span>
   </article>
 }
@@ -41,7 +41,8 @@ function dateParts(value) {
 }
 
 function Requester({ request, index }) {
-  return <span className="ear-requester"><span className="ear-avatar" style={{ backgroundColor: avatarColors[index % avatarColors.length] }}>{request.requester.charAt(0)}</span><span className="ear-two-line"><b>{request.requester}</b><small>{request.department}</small></span></span>
+  const initials = request.requester.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()
+  return <span className="ear-requester"><span className="ear-avatar" style={{ backgroundColor: avatarColors[index % avatarColors.length] }}>{initials}</span><span className="ear-two-line"><b>{request.requester}</b><small>{request.department}</small></span></span>
 }
 
 function DocumentCell({ request }) {
@@ -49,8 +50,34 @@ function DocumentCell({ request }) {
 }
 
 function AccessBadge({ permission }) {
-  const icon = permission === 'Read' ? 'eye' : permission === 'Download' ? 'download' : 'edit'
-  return <span className={`ear-access ear-access--${permission.toLowerCase()}`}><RequestIcon name={icon} />{permission === 'Edit' ? '+ Edit' : permission}</span>
+  const icon = permission.includes('Edit') ? 'edit' : permission.includes('Download') ? 'download' : 'eye'
+  const tone = permission.includes('Edit') ? 'edit' : permission.includes('Download') ? 'download' : 'read'
+  return <span className={`ear-access ear-access--${tone}`}><RequestIcon name={icon} />{permission}</span>
+}
+
+function normalizeRequest(item) {
+  const requested = item.requested_permissions || {}
+  const extension = (item.original_filename || '').split('.').pop()?.toUpperCase()
+  const permission = requested.can_edit
+    ? requested.can_download ? 'View + Download + Edit' : 'View + Edit'
+    : requested.can_download ? 'View & Download' : 'View'
+  return {
+    id: item.id,
+    date: item.requested_at,
+    requester: item.requester_name,
+    requesterEmail: item.requester_email,
+    requesterId: item.requester_user_id,
+    department: item.requester_department || '—',
+    document: item.original_filename || item.document_title,
+    documentId: item.document_id,
+    category: item.document_category || '—',
+    fileType: ['PDF', 'DOCX', 'XLSX', 'PPTX'].includes(extension) ? extension : 'Other',
+    permission,
+    reason: item.reason,
+    status: item.status.charAt(0) + item.status.slice(1).toLowerCase(),
+    isReviewer: item.is_reviewer,
+    decisionReason: item.decision_reason,
+  }
 }
 
 
@@ -66,12 +93,15 @@ export default function EmployeeAccessRequestsPage() {
   const [selected, setSelected] = useState([])
   const [openMenu, setOpenMenu] = useState('')
   const [notice, setNotice] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [summary, setSummary] = useState(null)
+  const [summaryError, setSummaryError] = useState('')
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState('')
   const pageSize = 8
 
-  async function loadRequests() {
-    setLoading(true)
+  async function loadRequests({ silent = false } = {}) {
+    if (!silent) setLoading(true)
     try {
       let currentPage = 1
       let allItems = []
@@ -82,31 +112,20 @@ export default function EmployeeAccessRequestsPage() {
         total = response.total
         currentPage += 1
       } while (allItems.length < total && currentPage <= 100)
-      setRequests(allItems.map((item) => {
-        const requested = item.requested_permissions || {}
-        const extension = (item.original_filename || '').split('.').pop()?.toUpperCase()
-        return {
-          id: item.id,
-          date: item.requested_at,
-          requester: item.requester_name,
-          requesterId: item.requester_user_id,
-          department: item.requester_department || '—',
-          document: item.original_filename || item.document_title,
-          documentId: item.document_id,
-          category: item.document_category || '—',
-          fileType: ['PDF', 'DOCX', 'XLSX', 'PPTX'].includes(extension) ? extension : 'Other',
-          permission: requested.can_edit ? 'Edit' : requested.can_download ? 'Download' : 'Read',
-          reason: item.reason,
-          status: item.status.charAt(0) + item.status.slice(1).toLowerCase(),
-          isReviewer: item.is_reviewer,
-          decisionReason: item.decision_reason,
-        }
-      }))
-      setNotice('')
+      setRequests(allItems.map(normalizeRequest))
+      setLoadError('')
+      try {
+        setSummary(await apiGet('/api/access-requests/summary'))
+        setSummaryError('')
+      } catch (error) {
+        setSummary(null)
+        setSummaryError(error.message || 'Access summary could not be loaded.')
+      }
     } catch (error) {
-      setNotice(error.message || 'Access requests could not be loaded.')
+      setLoadError(error.message || 'Access requests could not be loaded.')
+      if (!silent) setRequests([])
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -128,7 +147,7 @@ export default function EmployeeAccessRequestsPage() {
     const dateWindow = { 'Last 7 Days': 7, 'Last 30 Days': 30, 'Last 90 Days': 90 }[dateFilter]
     const cutoff = dateWindow ? Date.now() - dateWindow * 24 * 60 * 60 * 1000 : 0
     return requests.filter((request) => {
-      const matchesSearch = !search || [request.document, request.requester, request.department, request.status, request.reason].join(' ').toLowerCase().includes(search)
+      const matchesSearch = !search || [request.document, request.requester, request.requesterEmail, request.department, request.status, request.reason].join(' ').toLowerCase().includes(search)
       const matchesStatus = statusFilter === 'All Status' || request.status === statusFilter
       const matchesDocument = documentFilter === 'All Documents' || request.documentId === documentFilter
       const matchesRequester = requesterFilter === 'All Requesters' || request.requesterId === requesterFilter
@@ -147,9 +166,7 @@ export default function EmployeeAccessRequestsPage() {
   const pageRequests = visibleRequests.slice((safePage - 1) * pageSize, safePage * pageSize)
   const firstRow = visibleRequests.length ? (safePage - 1) * pageSize + 1 : 0
   const allPageSelected = pageRequests.length > 0 && pageRequests.every((request) => selected.includes(request.id))
-  const pendingCount = requests.filter((request) => request.status === 'Pending' && request.isReviewer).length
-  const approvedCount = requests.filter((request) => request.status === 'Approved').length
-  const deniedCount = requests.filter((request) => request.status === 'Denied').length
+  const metricValue = (value) => loading ? '…' : summaryError || loadError || value == null ? '—' : String(value)
 
   function resetPage() {
     setPage(1)
@@ -166,10 +183,13 @@ export default function EmployeeAccessRequestsPage() {
     setActionId(request.id)
     setNotice('')
     try {
-      await apiPost('/api/access-requests/' + encodeURIComponent(request.id) + '/' + action, {})
+      const updated = await apiPost('/api/access-requests/' + encodeURIComponent(request.id) + '/' + action, {})
+      setRequests((current) => current.map((item) => item.id === request.id ? normalizeRequest(updated) : item))
+      window.dispatchEvent(new Event('suredocs:access-requests-updated'))
       setNotice(action === 'approve' ? 'Access request approved.' : 'Access request declined.')
-      await loadRequests()
+      await loadRequests({ silent: true })
     } catch (error) {
+      await loadRequests({ silent: true })
       setNotice(error.message || 'The access request could not be updated.')
     } finally {
       setActionId('')
@@ -181,10 +201,13 @@ export default function EmployeeAccessRequestsPage() {
     setNotice('')
     try {
       const { apiDelete } = await import('./api.js')
-      await apiDelete('/api/access-requests/' + encodeURIComponent(request.id))
+      const updated = await apiDelete('/api/access-requests/' + encodeURIComponent(request.id))
+      setRequests((current) => current.map((item) => item.id === request.id ? normalizeRequest(updated) : item))
+      window.dispatchEvent(new Event('suredocs:access-requests-updated'))
       setNotice('Access request cancelled.')
-      await loadRequests()
+      await loadRequests({ silent: true })
     } catch (error) {
+      await loadRequests({ silent: true })
       setNotice(error.message || 'The access request could not be cancelled.')
     } finally {
       setActionId('')
@@ -202,16 +225,16 @@ export default function EmployeeAccessRequestsPage() {
     </header>
 
     {notice && <p className="ear-notice" role="status">{notice}</p>}
+    {loadError && <p className="ear-load-error" role="alert">{loadError}</p>}
 
     <section aria-label="Access request summary" className="ear-metrics">
-      <MetricCard detail="Awaiting your response" number={String(pendingCount)} title="Pending Requests" type="pending" />
-      <MetricCard detail="Granted access" number={String(approvedCount)} title="Approved Requests" type="approved" />
-      <MetricCard detail="Declined access" number={String(deniedCount)} title="Denied Requests" type="denied" />
-      <MetricCard detail="Requests visible to you" number={String(requests.length)} title="Total Requests" type="total" />
+      <MetricCard detail="Awaiting your response" number={metricValue(summary?.pending_requests)} title="Pending Requests" type="pending" />
+      <MetricCard detail="Distinct active recipients on your documents" number={metricValue(summary?.users_with_access)} title="Users with Access" type="approved" />
+      <MetricCard detail="Declined access" number={metricValue(summary?.denied_requests)} title="Denied Requests" type="denied" />
     </section>
 
     <section aria-label="Search and filter access requests" className="ear-toolbar">
-      <label className="ear-search"><RequestIcon name="search" /><span className="sr-only">Search requests by document, requester, or status</span><input onChange={(event) => { setQuery(event.target.value); resetPage() }} placeholder="Search requests by document, requester, or status..." value={query} /></label>
+      <label className="ear-search"><RequestIcon name="search" /><span className="sr-only">Search requests by document, requester, or reason</span><input onChange={(event) => { setQuery(event.target.value); resetPage() }} placeholder="Search requests by document, requester, or reason..." value={query} /></label>
       <label className="ear-filter"><span className="sr-only">Status</span><select onChange={(event) => { setStatusFilter(event.target.value); resetPage() }} value={statusFilter}><option>All Status</option><option>Pending</option><option>Approved</option><option>Denied</option><option>Cancelled</option><option>Expired</option></select><RequestIcon name="chevron" /></label>
       <label className="ear-filter ear-filter--documents"><span className="sr-only">Document</span><select onChange={(event) => { setDocumentFilter(event.target.value); resetPage() }} value={documentFilter}><option>All Documents</option>{documentOptions.map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select><RequestIcon name="chevron" /></label>
       <label className="ear-filter ear-filter--requesters"><span className="sr-only">Requester</span><select onChange={(event) => { setRequesterFilter(event.target.value); resetPage() }} value={requesterFilter}><option>All Requesters</option>{requesterOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select><RequestIcon name="chevron" /></label>
@@ -236,15 +259,15 @@ export default function EmployeeAccessRequestsPage() {
               <td><DocumentCell request={request} /></td>
               <td><AccessBadge permission={request.permission} /></td>
               <td><span className="ear-reason" title={request.reason}>{request.reason}</span></td>
-              <td><span className={'ear-status ear-status--' + request.status.toLowerCase()}>{request.status}</span></td>
+              <td><span className={'ear-status ear-status--' + request.status.toLowerCase()}>{['Pending', 'Approved', 'Denied'].includes(request.status) && <RequestIcon name={{ Pending: 'clock', Approved: 'check', Denied: 'deny' }[request.status]} />}{request.status}</span></td>
               <td className="ear-row-actions">{request.status === 'Pending'
                 ? request.isReviewer
-                  ? <><button className="ear-accept" disabled={actionId === request.id} onClick={() => decide(request, 'approve')} type="button">{actionId === request.id ? '…' : 'Accept'}</button><button className="ear-decline" disabled={actionId === request.id} onClick={() => decide(request, 'deny')} type="button">Decline</button></>
-                  : <button className="ear-decline" disabled={actionId === request.id} onClick={() => cancelRequest(request)} type="button">Cancel</button>
+                  ? <><button aria-label={`Approve ${request.requester}'s request`} className="ear-accept" disabled={actionId === request.id} onClick={() => decide(request, 'approve')} title="Approve request" type="button">{actionId === request.id ? '…' : <RequestIcon name="check" />}</button><button aria-label={`Deny ${request.requester}'s request`} className="ear-decline" disabled={actionId === request.id} onClick={() => decide(request, 'deny')} title="Deny request" type="button">{actionId === request.id ? '…' : <RequestIcon name="deny" />}</button></>
+                  : <button aria-label={`Cancel ${request.requester}'s request`} className="ear-decline" disabled={actionId === request.id} onClick={() => cancelRequest(request)} title="Cancel request" type="button">{actionId === request.id ? '…' : <RequestIcon name="deny" />}</button>
                 : <div className="ear-menu-anchor"><button aria-expanded={openMenu === request.id} aria-label={'Actions for ' + request.id} className="ear-more" onClick={() => setOpenMenu((current) => current === request.id ? '' : request.id)} type="button"><RequestIcon name="more" /></button>{openMenu === request.id && <div className="ear-row-menu" role="menu"><strong>{request.id}</strong><span>{request.requester} · {request.status}</span><span>{request.reason}</span>{request.decisionReason && <span>{request.decisionReason}</span>}</div>}</div>}</td>
             </tr>
           })}
-          {!loading && pageRequests.length === 0 && <tr><td className="ear-empty" colSpan="8">{notice || 'No requests match the selected search and filters.'}</td></tr>}
+          {!loading && pageRequests.length === 0 && <tr><td className="ear-empty" colSpan="8">{loadError || 'No requests match the selected search and filters.'}</td></tr>}
           {loading && <tr><td className="ear-empty" colSpan="8">Loading requests…</td></tr>}
         </tbody>
       </table></div>

@@ -54,6 +54,33 @@ class LoginRequest(BaseModel):
         return value
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., max_length=320, description="Work email address")
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        normalized = value.strip()
+        is_suredocs_test_email = normalized.lower().endswith("@suredocs.test")
+        try:
+            return validate_email(
+                normalized,
+                check_deliverability=False,
+                test_environment=is_suredocs_test_email,
+            ).normalized.lower()
+        except EmailNotValidError as exc:
+            raise ValueError("Enter a valid email address.") from exc
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = ""
+    new_password: str = ""
+
+
+class PasswordRecoveryResponse(BaseModel):
+    message: str
+
+
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------

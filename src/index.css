@@ -68,6 +68,10 @@ input {
   background-size: 67px 67px;
 }
 
+.login-page:has(.login-recovery-panel) .login-brand-panel {
+  flex-basis: 58%;
+}
+
 .login-brand-header {
   display: flex;
   flex: 0 0 clamp(68px, min(6vw, 10vh), 90px);
@@ -456,6 +460,111 @@ input {
   color: #4d5661;
 }
 
+.login-recovery-panel {
+  flex: 0 0 42%;
+}
+
+.login-recovery-panel .login-form-content {
+  left: 8px;
+  width: clamp(280px, min(32vw, 46vh), 460px);
+  padding-top: clamp(120px, 17vh, 190px);
+}
+
+.login-recovery-panel .login-form-content h1 {
+  font-size: clamp(27px, min(2.7vw, 4.4vh), 36px);
+}
+
+.login-recovery-panel .login-form-subtitle {
+  font-size: clamp(12px, min(1.1vw, 1.8vh), 15px);
+}
+
+.login-recovery-panel .login-form-content form {
+  margin-top: clamp(32px, 2.7vw, 38px);
+}
+
+.login-recovery-panel .login-field-label {
+  font-size: clamp(10px, min(0.95vw, 1.5vh), 13px);
+}
+
+.login-recovery-panel .login-input-wrap {
+  height: clamp(40px, min(3.6vw, 5.3vh), 46px);
+}
+
+.login-recovery-panel .login-submit {
+  height: clamp(40px, min(3.6vw, 5.3vh), 46px);
+}
+
+.login-recovery-panel .login-recovery-back {
+  margin-top: clamp(16px, 1.8vw, 24px);
+}
+
+.login-recovery-input-wrap {
+  background: #eaf1fc;
+}
+
+.login-recovery-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-left: 13px;
+  color: #43526a;
+}
+
+.login-recovery-input-wrap .login-input {
+  padding-left: 12px;
+}
+
+.login-recovery-back {
+  display: inline-block;
+  margin-top: clamp(18px, 1.8vw, 28px);
+  color: #203fc2;
+  font-size: clamp(9px, min(0.95vw, 1.5vh), 14px);
+  line-height: 1.4;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.login-recovery-security,
+.login-recovery-confirmation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: clamp(40px, 5vw, 64px) 0 0;
+  color: #68788c;
+  font-size: clamp(8px, min(0.85vw, 1.35vh), 12px);
+  line-height: 1.5;
+}
+
+.login-recovery-lock {
+  width: 15px;
+  height: 17px;
+  flex: 0 0 15px;
+  color: #53677f;
+}
+
+.login-recovery-confirmation {
+  margin-top: clamp(30px, 3vw, 44px);
+  color: #263a55;
+}
+
+.login-recovery-result .login-recovery-back {
+  margin-top: clamp(24px, 2.2vw, 34px);
+}
+
+.login-recovery-panel .login-notice.has-notice {
+  display: block;
+}
+
+.login-recovery-password-hint {
+  margin: 6px 0 0;
+  color: #68788c;
+  font-size: clamp(8px, min(0.75vw, 1.2vh), 11px);
+}
+
+.login-recovery-signin {
+  text-decoration: none;
+}
+
 @keyframes login-spin {
   to { transform: rotate(360deg); }
 }
@@ -494,6 +603,12 @@ input {
   }
 
   .login-form-content {
+    padding-top: 92px;
+  }
+
+  .login-recovery-panel .login-form-content {
+    left: 0;
+    width: clamp(280px, min(84vw, 46vh), 460px);
     padding-top: 92px;
   }
 
@@ -735,6 +850,130 @@ input {
   overflow-wrap: anywhere;
   tab-size: 2;
   white-space: pre-wrap;
+}
+
+.document-viewer-markdown {
+  color: #202124;
+  font: 15px/1.65 Arial, Helvetica, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+.document-viewer-markdown h1,
+.document-viewer-markdown h2,
+.document-viewer-markdown h3,
+.document-viewer-markdown h4,
+.document-viewer-markdown h5,
+.document-viewer-markdown h6 {
+  margin: 1.2em 0 0.55em;
+  color: #202124;
+  line-height: 1.25;
+}
+
+.document-viewer-markdown p,
+.document-viewer-markdown ul,
+.document-viewer-markdown blockquote,
+.document-viewer-markdown pre {
+  margin: 0 0 1em;
+}
+
+.document-viewer-markdown blockquote {
+  border-left: 3px solid #dfe1e5;
+  padding-left: 16px;
+  color: #5f6368;
+}
+
+.document-viewer-markdown pre,
+.document-viewer-markdown code {
+  font-family: Consolas, 'Courier New', monospace;
+}
+
+.document-viewer-markdown pre {
+  overflow: auto;
+  padding: 14px;
+  background: #f6f8fa;
+}
+
+.document-viewer-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+}
+
+.document-viewer-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #202124;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.document-viewer-data-table th,
+.document-viewer-data-table td {
+  min-width: 100px;
+  max-width: 420px;
+  padding: 8px 10px;
+  border-right: 1px solid #e3e5e8;
+  border-bottom: 1px solid #e3e5e8;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.document-viewer-data-table th {
+  position: sticky;
+  top: 0;
+  background: #f5f7fa;
+  font-weight: 650;
+}
+
+.document-viewer-workbook {
+  min-width: 100%;
+}
+
+.document-viewer-sheet-picker {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: #5f6368;
+  font: 13px Arial, Helvetica, sans-serif;
+}
+
+.document-viewer-sheet-picker select {
+  max-width: min(360px, 70vw);
+  padding: 7px 28px 7px 9px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  background: #fff;
+  color: #202124;
+  font: inherit;
+}
+
+.document-viewer-slide {
+  width: min(100%, 1100px);
+  min-height: 540px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 72px);
+  background: #fff;
+  box-shadow: 0 1px 5px rgba(32, 33, 36, 0.18);
+  color: #202124;
+  font: 18px/1.55 Arial, Helvetica, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+.document-viewer-slide-label {
+  margin: 0 0 26px;
+  color: #5f6368;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.document-viewer-empty-sheet {
+  color: #5f6368;
+  font: 14px/1.55 Arial, Helvetica, sans-serif;
 }
 
 .document-viewer-content-note {

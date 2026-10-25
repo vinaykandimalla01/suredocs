@@ -1,22 +1,21 @@
 const auditSeed = [
   ['2026-10-22T10:14:00', 'Uploaded', 'Project_Proposal.pdf', 'File uploaded (2.4 MB)', '192.168.1.24', 'Success', 'Windows PC'],
   ['2026-10-21T16:32:00', 'Downloaded', 'Q3_Report.xlsx', 'File downloaded (1.8 MB)', '192.168.1.24', 'Success', 'Windows PC'],
-  ['2026-10-20T11:11:00', 'Edited', 'Design_Guidelines.docx', 'Metadata updated', '192.168.1.84', 'Success', 'MacBook Pro'],
+  ['2026-10-20T11:11:00', 'Edited', 'Design_Guidelines.docx', 'Metadata updated', '192.168.1.89', 'Success', 'MacBook Pro'],
   ['2026-10-19T14:45:00', 'Viewed', 'Marketing_Plan.pptx', 'Viewed document', '192.168.1.120', 'Success', 'Windows PC'],
-  ['2026-10-18T09:20:00', 'Deleted', 'Old_Draft.pdf', 'Document deleted', '192.168.1.24', 'Denied', 'Windows PC'],
-  ['2026-10-17T13:02:00', 'Shared', 'Product_Requirements.pdf', 'Shared with Priya Mehta', '192.168.1.45', 'Success', 'iPhone 14'],
-  ['2026-10-17T09:12:00', 'Login', '—', 'User logged in', '192.168.1.24', 'Success', 'Windows PC'],
-  ['2026-10-16T07:42:00', 'Failed Login', '—', 'Invalid password', '203.0.113.45', 'Denied', 'Unknown'],
-  ['2026-10-15T15:22:00', 'Uploaded', 'Architecture.png', 'File uploaded (980 KB)', '192.168.1.24', 'Success', 'Windows PC'],
-  ['2026-10-14T12:08:00', 'Downloaded', 'Employee_Handbook.pdf', 'File downloaded (4.6 MB)', '192.168.1.24', 'Success', 'Windows PC'],
-  ['2026-10-13T10:35:00', 'Edited', 'Meeting_Notes.txt', 'Document details updated', '192.168.1.84', 'Success', 'MacBook Pro'],
-  ['2026-10-12T08:14:00', 'Failed Login', '—', 'Invalid 2FA code', '203.0.113.45', 'Denied', 'Unknown'],
-  ['2026-10-11T16:55:00', 'Viewed', 'Source_Files.zip', 'Viewed document details', '192.168.1.24', 'Success', 'Windows PC'],
-  ['2026-10-10T11:41:00', 'Shared', 'Q3_Report.xlsx', 'Access granted to Priya Mehta', '192.168.1.45', 'Success', 'iPhone 14'],
-  ['2026-10-09T09:04:00', 'Deleted', 'Temp_Export.csv', 'Delete permission required', '192.168.1.24', 'Denied', 'Windows PC'],
-  ['2026-10-08T13:26:00', 'Login', '—', 'User logged in', '192.168.1.84', 'Success', 'MacBook Pro'],
+  ['2026-10-19T19:45:00', 'Deleted', 'Old_Draft.pdf', 'Document deleted', '192.168.1.120', 'Denied', 'Windows PC'],
+  ['2026-10-18T09:20:00', 'Shared', 'Product_Requirements.pdf', 'Shared with Priya Mehta', '192.168.1.45', 'Success', 'iPhone 14'],
+  ['2026-10-17T12:12:00', 'Login', '—', 'User logged in', '192.168.1.24', 'Success', 'Windows PC'],
+  ['2026-10-17T14:08:00', 'Failed Login', '—', 'Invalid password', '203.0.113.45', 'Denied', 'Unknown'],
+  ['2026-10-16T15:22:00', 'Uploaded', 'Architecture.png', 'File uploaded (980 KB)', '192.168.1.24', 'Success', 'Windows PC'],
+  ['2026-10-15T12:08:00', 'Downloaded', 'Employee_Handbook.pdf', 'File downloaded (4.6 MB)', '192.168.1.24', 'Success', 'Windows PC'],
+  ['2026-10-14T10:35:00', 'Edited', 'Meeting_Notes.txt', 'Document details updated', '192.168.1.89', 'Success', 'MacBook Pro'],
+  ['2026-10-13T08:14:00', 'Failed Login', '—', 'Invalid 2FA code', '203.0.113.45', 'Denied', 'Unknown'],
+  ['2026-10-12T16:55:00', 'Viewed', 'Source_Files.zip', 'Viewed document details', '192.168.1.24', 'Success', 'Windows PC'],
+  ['2026-10-11T11:41:00', 'Shared', 'Q3_Report.xlsx', 'Access granted to Priya Mehta', '192.168.1.45', 'Success', 'iPhone 14'],
+  ['2026-10-10T09:04:00', 'Deleted', 'Temp_Export.csv', 'Delete permission required', '192.168.1.24', 'Denied', 'Windows PC'],
+  ['2026-10-09T13:26:00', 'Login', '—', 'User logged in', '192.168.1.89', 'Success', 'MacBook Pro'],
 ]
-
 export const profileFixture = {
   phone: '+91 98765 43210',
   employeeId: 'EMP-001',
@@ -107,10 +106,26 @@ const documents = [
   ['Release_Plan.pptx', 'PPTX', 'Rahul Sharma', 'Owned', '6.7 MB', 'Shared', 'Oct 07, 2026, 05:08 PM', '2026-10-07', 'orange'],
 ]
 
-export const profileDocuments = documents.map(([name, type, owner, access, size, action, activity, date, tone], index) => ({
-  id: `doc-${index + 1}`, name, type, owner, access, size, action, activity, date, tone,
-}))
-
+export const profileDocuments = [
+  ...documents.map(([name, type, owner, access, size, action, activity, date, tone], index) => ({
+    id: `doc-${index + 1}`, name, type, owner, access, size, action, activity, date, tone,
+  })),
+  ...Array.from({ length: 45 - documents.length }, (_, index) => {
+    const sequence = documents.length + index + 1
+    const access = index < 9 ? 'Owned' : index < 18 ? 'Shared with user' : 'Department'
+    const type = ['PDF', 'XLSX', 'DOCX', 'PPTX', 'TXT', 'PNG', 'ZIP'][index % 7]
+    const tone = { PDF: 'red', XLSX: 'green', DOCX: 'blue', PPTX: 'orange', TXT: 'slate', PNG: 'blue', ZIP: 'amber' }[type]
+    const day = 22 - (sequence % 30)
+    const date = new Date(Date.UTC(2026, 9, day)).toISOString().slice(0, 10)
+    const owners = access === 'Owned' ? ['Rahul Sharma'] : access === 'Shared with user' ? ['Priya Mehta', 'Amit Kumar', 'Sneha Reddy'] : ['HR Team', 'Finance Team', 'Legal Team']
+    const owner = owners[index % owners.length]
+    const name = ['Security_Policy', 'Product_Roadmap', 'Quarterly_Review', 'Team_Guidelines', 'Meeting_Summary'][index % 5] + '_' + String(sequence).padStart(2, '0') + '.' + type.toLowerCase()
+    const action = ['Viewed', 'Downloaded', 'Edited', 'Shared'][index % 4]
+    const time = ['10:14 AM', '04:32 PM', '11:11 AM', '02:45 PM'][index % 4]
+    const displayDate = new Date(date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+    return { id: `doc-${sequence}`, name, type, owner, access, size: ['840 KB', '1.2 MB', '2.4 MB', '460 KB'][index % 4], action, activity: displayDate + ', ' + time, date, tone }
+  }),
+]
 export const activityMetrics = [
   { label: 'Total Actions', value: 128, trend: '+12%', tone: 'blue', icon: 'document' },
   { label: 'Uploads', value: 28, trend: '+27%', tone: 'green', icon: 'upload' },
@@ -127,16 +142,16 @@ export const activityDistribution = [
   { name: 'Views', value: 47, color: '#8b5cf6' },
 ]
 
-export const recentActivity = auditSeed.slice(0, 8).map(([timestamp, action, document, details, ip, status], index) => ({
+export const recentActivity = auditSeed.slice(0, 8).map(([timestamp, action, document, details, ip, status, device], index) => ({
   id: `activity-${index + 1}`,
   timestamp,
-  action: index === 3 ? 'Shared' : action,
+  action,
   document,
-  details: index === 3 ? 'Shared with Priya Mehta' : details,
+  details,
   ip,
   status,
+  device,
 }))
-
 export const securityOverview = [
   { label: 'Account Status', value: 'Active', tone: 'green', icon: 'shield' },
   { label: '2FA Status', value: 'Enabled', tone: 'green', icon: 'lock' },
@@ -188,20 +203,30 @@ export const auditActionDistribution = [
   { name: 'Other', value: 5, color: '#64748b' },
 ]
 
-export const auditRecords = auditSeed.map(([timestamp, action, resource, details, ip, status, device], index) => ({
-  id: `audit-${String(index + 1).padStart(3, '0')}`,
-  eventId: `EVT-2026-${String(128 - index).padStart(4, '0')}`,
-  timestamp,
-  user: 'Rahul Sharma',
-  action,
-  resource,
-  details,
-  ip,
-  status,
-  device,
-  reason: status === 'Denied' ? details : '',
-}))
-
+export const auditRecords = Array.from({ length: 128 }, (_, index) => {
+  const seed = auditSeed[index % auditSeed.length]
+  const [seedTimestamp, action, resource, details, ip, status, device] = seed
+  const timestamp = index < auditSeed.length
+    ? seedTimestamp
+    : (() => {
+      const date = new Date(Date.UTC(2026, 9, 22 - (index % 30), 9 + (index % 10), (index * 7) % 60))
+      return date.toISOString().slice(0, 19)
+    })()
+  const eventStatus = index < auditSeed.length ? status : [20, 36, 52, 68, 84, 100].includes(index) ? 'Denied' : 'Success'
+  return {
+    id: `audit-${String(index + 1).padStart(3, '0')}`,
+    eventId: `EVT-2026-${String(128 - index).padStart(4, '0')}`,
+    timestamp,
+    user: 'Rahul Sharma',
+    action,
+    resource,
+    details,
+    ip,
+    status: eventStatus,
+    device,
+    reason: eventStatus === 'Denied' ? details : '',
+  }
+})
 export function buildTrendData(range = 'Last 30 days', aggregation = 'Daily', audit = false) {
   const points = range === 'Last 7 days' ? 7 : range === 'Last 90 days' ? 90 : 30
   const bucket = aggregation === 'Weekly' ? 7 : aggregation === 'Monthly' ? 30 : 1

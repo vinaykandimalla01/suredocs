@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import uuid
 
 from app.core.security import generate_session_token, hash_session_token
+from app.models.auth_event import AuthEvent, AuthEventType
+from app.models.documents import Document, DocumentAuditLog, DocumentPermission, DocumentVersion
+from app.models.persistence import UserMfaMethod
 from app.models.user import User
 from app.models.user_session import UserSession
 
@@ -44,6 +48,9 @@ def test_admin_list_is_paginated_filtered_and_safe(client, db, active_admin, act
     assert body["items"][0]["employee_code"] == "TEST-001"
     assert "password_hash" not in response.text
     assert "session_token_hash" not in response.text
+    employee_code_search = client.get("/api/admin/users?search=TEST-001")
+    assert employee_code_search.status_code == 200
+    assert employee_code_search.json()["total"] == 1
 
 
 def test_admin_detail_resolves_creator_without_exposing_creator_id(
@@ -61,6 +68,106 @@ def test_admin_detail_resolves_creator_without_exposing_creator_id(
     }
     assert "password_hash" not in response.text
     assert str(active_admin.id) not in str(body["created_by"])
+
+
+def test_admin_user_profile_returns_real_document_permission_and_security_data(
+    client, db, active_admin, active_employee
+):
+    authenticate(client, db, active_admin)
+    now = datetime.now(timezone.utc)
+    document = Document(
+        owner_user_id=active_employee.id,
+        created_by_user_id=active_employee.id,
+        title="Profile test document",
+        classification="INTERNAL",
+        status="ACTIVE",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(document)
+    db.flush()
+    version_id = uuid.uuid4()
+    version = DocumentVersion(
+        id=version_id,
+        document_id=document.id,
+        version_number=1,
+        storage_bucket="private-test-bucket",
+        storage_key=f"documents/{document.id}/versions/{version_id}/content",
+        original_filename="profile-test.pdf",
+        file_extension="pdf",
+        content_type="application/pdf",
+        size_bytes=1024,
+        checksum_sha256="a" * 64,
+        status="AVAILABLE",
+        uploaded_by_user_id=active_employee.id,
+        uploaded_at=now,
+    )
+    db.add(version)
+    db.flush()
+    document.current_version_id = version.id
+    db.add(DocumentPermission(
+        document_id=document.id,
+        user_id=active_admin.id,
+        can_view=True,
+        can_download=False,
+        can_edit=False,
+        granted_by_user_id=active_employee.id,
+        granted_at=now,
+    ))
+    db.add(DocumentAuditLog(
+        document_id=document.id,
+        document_id_snapshot=document.id,
+        actor_user_id=active_employee.id,
+        actor_user_id_snapshot=active_employee.id,
+        actor_name_snapshot=active_employee.full_name,
+        actor_email_snapshot=active_employee.email,
+        actor_role_snapshot="EMPLOYEE",
+        action_type="DOCUMENT_UPLOADED",
+        result="SUCCESS",
+        occurred_at=now,
+        details={"filename": "profile-test.pdf", "storage_key": "must-not-leak"},
+    ))
+    db.add(AuthEvent(
+        user_id=active_employee.id,
+        event_type=AuthEventType.LOGIN_FAILED,
+        occurred_at=now,
+        ip_address="192.0.2.9",
+        user_agent="Test Browser",
+        details={"reason": "invalid_credentials"},
+    ))
+    db.add(UserMfaMethod(
+        user_id=active_employee.id,
+        method_type="TOTP",
+        secret_ciphertext=b"encrypted-test-secret",
+        is_enabled=True,
+        confirmed_at=now,
+    ))
+    db.flush()
+
+    response = client.get(f"/api/admin/users/{active_employee.id}/profile")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["user"]["id"] == str(active_employee.id)
+    assert payload["summary"]["owned_documents"] == 1
+    assert payload["summary"]["shared_documents"] == 0
+    assert payload["summary"]["documents_uploaded"] == 1
+    assert payload["documents"][0]["filename"] == "profile-test.pdf"
+    assert payload["documents"][0]["storage_reference_configured"] is True
+    assert payload["permissions"][0]["direction"] == "granted"
+    assert payload["security"]["two_factor_enabled"] is True
+    assert any(event["action"] == "LOGIN_FAILED" for event in payload["events"])
+    assert "storage_key" not in response.text
+    assert "encrypted-test-secret" not in response.text
+    assert "session_token_hash" not in response.text
+
+    shared_profile = client.get(f"/api/admin/users/{active_admin.id}/profile")
+    assert shared_profile.status_code == 200, shared_profile.text
+    shared_payload = shared_profile.json()
+    assert shared_payload["summary"]["shared_documents"] == 1
+    assert shared_payload["documents_total"] == 1
+    assert shared_payload["documents"][0]["access"] == "Shared with user"
+    assert shared_payload["permissions"][0]["direction"] == "received"
 
 
 def test_employee_profile_uses_authenticated_identity_only(client, db, active_employee):
@@ -88,6 +195,7 @@ def test_employee_cannot_access_admin_user_list(client, db, active_employee):
 def test_profile_endpoints_require_authentication(client):
     assert client.get("/api/admin/users").status_code == 401
     assert client.get("/api/admin/users/summary").status_code == 401
+    assert client.get(f"/api/admin/users/{uuid.uuid4()}/profile").status_code == 401
     assert client.get("/api/users/me/profile").status_code == 401
     assert client.get("/api/auth/me").status_code == 401
 
@@ -137,6 +245,7 @@ def test_two_users_sequential_login_and_logout(client, active_admin, active_empl
 
     # Confirm admin-only route is blocked for the employee
     assert client.get("/api/admin/users").status_code == 403
+    assert client.get(f"/api/admin/users/{active_employee.id}/profile").status_code == 403
 
 
 def test_admin_summary_endpoint(client, db, active_admin):

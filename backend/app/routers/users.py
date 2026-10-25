@@ -8,15 +8,15 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.orm import Session, aliased, joinedload
 
 from app.core.config import COOKIE_NAME
 from app.core.dependencies import get_current_user, require_admin, require_employee
 from app.core.security import hash_password, hash_session_token, verify_password
 from app.db.session import get_db
 from app.models.auth_event import AuthEvent, AuthEventType
-from app.models.documents import Document, DocumentVersion
+from app.models.documents import Document, DocumentAuditLog, DocumentPermission, DocumentVersion
 from app.models.persistence import Notification, UserMfaMethod
 from app.models.user import AccountStatus, User, UserRole
 from app.models.user_session import UserSession
@@ -188,7 +188,10 @@ async def list_users(
     if search and search.strip():
         search_term = f"%{search.strip()}%"
         filters.append(
-            User.full_name.ilike(search_term) | User.email.ilike(search_term)
+            User.full_name.ilike(search_term)
+            | User.email.ilike(search_term)
+            | User.department.ilike(search_term)
+            | User.employee_code.ilike(search_term)
         )
     if role is not None:
         filters.append(User.role == role)
@@ -294,6 +297,366 @@ async def get_user(
             else None
         ),
     )
+
+
+@admin_router.get(
+    "/{user_id}/profile",
+    dependencies=[Depends(require_admin)],
+)
+async def get_admin_user_profile_data(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return database-backed profile, document, permission, activity, and security data."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    now = datetime.now(timezone.utc)
+    active_permission = and_(
+        DocumentPermission.revoked_at.is_(None),
+        or_(
+            DocumentPermission.expires_at.is_(None),
+            DocumentPermission.expires_at > now,
+        ),
+    )
+    accessible_permission = (
+        select(DocumentPermission.id)
+        .where(
+            DocumentPermission.document_id == Document.id,
+            DocumentPermission.user_id == user.id,
+            DocumentPermission.can_view.is_(True),
+            active_permission,
+            Document.status == "ACTIVE",
+        )
+        .exists()
+    )
+    documents = db.execute(
+        select(Document)
+        .options(joinedload(Document.owner), joinedload(Document.current_version))
+        .where(
+            Document.status != "DELETED",
+            Document.deleted_at.is_(None),
+            or_(Document.owner_user_id == user.id, accessible_permission),
+        )
+        .order_by(Document.updated_at.desc(), Document.id)
+        .limit(100)
+    ).unique().scalars().all()
+
+    owner = aliased(User)
+    grantor = aliased(User)
+    recipient = aliased(User)
+    permission_rows = db.execute(
+        select(DocumentPermission, Document, owner, grantor, recipient)
+        .join(Document, Document.id == DocumentPermission.document_id)
+        .join(owner, owner.id == Document.owner_user_id)
+        .join(grantor, grantor.id == DocumentPermission.granted_by_user_id)
+        .join(recipient, recipient.id == DocumentPermission.user_id)
+        .where(
+            or_(
+                DocumentPermission.user_id == user.id,
+                Document.owner_user_id == user.id,
+            )
+        )
+        .order_by(DocumentPermission.granted_at.desc(), DocumentPermission.id)
+        .limit(200)
+    ).all()
+
+    def permission_status(permission: DocumentPermission, document: Document) -> str:
+        if permission.revoked_at is not None:
+            return "Revoked"
+        if permission.expires_at is not None and permission.expires_at <= now:
+            return "Expired"
+        if document.status != "ACTIVE" or document.deleted_at is not None:
+            return "Unavailable"
+        return "Active"
+
+    permissions = []
+    for permission, document, document_owner, granting_user, permission_user in permission_rows:
+        version = document.current_version
+        permissions.append({
+            "id": str(permission.id),
+            "document_id": str(document.id),
+            "document_title": document.title,
+            "document_filename": version.original_filename if version else None,
+            "owner_id": str(document_owner.id),
+            "owner_name": document_owner.full_name,
+            "user_id": str(permission.user_id),
+            "user_name": permission_user.full_name,
+            "direction": "received" if permission.user_id == user.id else "granted",
+            "can_view": permission.can_view,
+            "can_download": permission.can_download,
+            "can_edit": permission.can_edit,
+            "granted_by_name": granting_user.full_name,
+            "granted_at": permission.granted_at,
+            "expires_at": permission.expires_at,
+            "revoked_at": permission.revoked_at,
+            "status": permission_status(permission, document),
+        })
+
+    document_events = db.execute(
+        select(DocumentAuditLog, Document.title)
+        .outerjoin(Document, Document.id == DocumentAuditLog.document_id_snapshot)
+        .where(
+            or_(
+                DocumentAuditLog.actor_user_id == user.id,
+                DocumentAuditLog.actor_user_id_snapshot == user.id,
+                DocumentAuditLog.target_user_id == user.id,
+                DocumentAuditLog.target_user_id_snapshot == user.id,
+                Document.owner_user_id == user.id,
+            )
+        )
+        .order_by(DocumentAuditLog.occurred_at.desc(), DocumentAuditLog.id)
+        .limit(100)
+    ).all()
+    auth_events = db.execute(
+        select(AuthEvent)
+        .where(AuthEvent.user_id == user.id)
+        .order_by(AuthEvent.occurred_at.desc(), AuthEvent.id)
+        .limit(100)
+    ).scalars().all()
+
+    def safe_details(value):
+        sensitive_parts = (
+            "password", "token", "secret", "credential", "authorization",
+            "cookie", "session", "presigned", "storage_key", "s3_key",
+            "bucket", "object_key",
+        )
+        if isinstance(value, dict):
+            return {
+                str(key): safe_details(item)
+                for key, item in value.items()
+                if not any(
+                    part in str(key).lower().replace("-", "_")
+                    for part in sensitive_parts
+                )
+            }
+        if isinstance(value, list):
+            return [safe_details(item) for item in value[:100]]
+        if isinstance(value, str):
+            return value[:2000]
+        return value
+
+    events = [
+        {
+            "id": str(event.id),
+            "source": "document",
+            "timestamp": event.occurred_at,
+            "action": event.action_type,
+            "result": event.result,
+            "document": title or "Unavailable document",
+            "details": safe_details(event.details),
+            "ip_address": event.ip_address,
+            "user_agent": event.user_agent,
+        }
+        for event, title in document_events
+    ]
+    events.extend(
+        {
+            "id": str(event.id),
+            "source": "authentication",
+            "timestamp": event.occurred_at,
+            "action": event.event_type.value,
+            "result": (
+                "FAILED"
+                if event.event_type in {
+                    AuthEventType.LOGIN_FAILED,
+                    AuthEventType.MFA_REJECTED,
+                    AuthEventType.ACCOUNT_LOCKED,
+                }
+                else "DENIED"
+                if event.event_type == AuthEventType.AUTH_REJECTED_INACTIVE
+                else "SUCCESS"
+            ),
+            "document": None,
+            "details": safe_details(event.details),
+            "ip_address": event.ip_address,
+            "user_agent": event.user_agent,
+        }
+        for event in auth_events
+    )
+    events.sort(key=lambda event: event["timestamp"], reverse=True)
+    events = events[:100]
+
+    session_rows = db.execute(
+        select(UserSession)
+        .where(UserSession.user_id == user.id)
+        .order_by(UserSession.last_seen_at.desc().nullslast(), UserSession.created_at.desc())
+        .limit(100)
+    ).scalars().all()
+    sessions = [
+        {
+            "id": str(session.id),
+            "device": _session_device(session.user_agent),
+            "ip_address": session.ip_address,
+            "user_agent": session.user_agent,
+            "last_active": session.last_seen_at or session.created_at,
+            "status": (
+                "Revoked" if session.revoked_at is not None
+                else "Expired" if session.expires_at <= now
+                else "Active"
+            ),
+            "expires_at": session.expires_at,
+        }
+        for session in session_rows
+    ]
+
+    document_metrics = db.execute(
+        select(
+            func.count(func.distinct(Document.id)).filter(
+                Document.owner_user_id == user.id,
+                Document.status != "DELETED",
+                Document.deleted_at.is_(None),
+            ).label("owned"),
+            func.count(func.distinct(Document.id)).filter(
+                DocumentPermission.user_id == user.id,
+                DocumentPermission.can_view.is_(True),
+                active_permission,
+                Document.status == "ACTIVE",
+                Document.deleted_at.is_(None),
+            ).label("shared"),
+        )
+        .select_from(Document)
+        .outerjoin(DocumentPermission, DocumentPermission.document_id == Document.id)
+    ).mappings().one()
+    accessible_document_total = db.scalar(
+        select(func.count(func.distinct(Document.id)))
+        .where(
+            Document.status != "DELETED",
+            Document.deleted_at.is_(None),
+            or_(Document.owner_user_id == user.id, accessible_permission),
+        )
+    ) or 0
+    activity_metrics = db.execute(
+        select(
+            func.count(DocumentAuditLog.id).filter(
+                DocumentAuditLog.action_type == "DOCUMENT_UPLOADED"
+            ).label("uploads"),
+            func.count(DocumentAuditLog.id).filter(
+                DocumentAuditLog.action_type == "DOCUMENT_DOWNLOADED"
+            ).label("downloads"),
+            func.count(DocumentAuditLog.id).filter(
+                DocumentAuditLog.action_type == "PERMISSION_GRANTED"
+            ).label("shares"),
+            func.count(DocumentAuditLog.id).filter(
+                DocumentAuditLog.action_type.in_(
+                    ("DOCUMENT_METADATA_UPDATED", "DOCUMENT_VERSION_CREATED")
+                )
+            ).label("edits"),
+            func.count(DocumentAuditLog.id).filter(
+                DocumentAuditLog.action_type == "DOCUMENT_DELETED"
+            ).label("deletions"),
+        )
+        .where(
+            or_(
+                DocumentAuditLog.actor_user_id == user.id,
+                DocumentAuditLog.actor_user_id_snapshot == user.id,
+            )
+        )
+    ).mappings().one()
+    permission_metrics = db.execute(
+        select(
+            func.count(DocumentPermission.id).filter(
+                active_permission,
+                Document.status == "ACTIVE",
+                Document.deleted_at.is_(None),
+            ).label("active"),
+            func.count(DocumentPermission.id).filter(
+                DocumentPermission.revoked_at.is_not(None)
+            ).label("revoked"),
+        )
+        .select_from(DocumentPermission)
+        .join(Document, Document.id == DocumentPermission.document_id)
+        .where(
+            or_(
+                DocumentPermission.user_id == user.id,
+                Document.owner_user_id == user.id,
+            )
+        )
+    ).mappings().one()
+    active_sessions = db.scalar(
+        select(func.count()).select_from(UserSession).where(
+            UserSession.user_id == user.id,
+            UserSession.revoked_at.is_(None),
+            UserSession.expires_at > now,
+        )
+    ) or 0
+    mfa_enabled = db.scalar(
+        select(UserMfaMethod.id).where(
+            UserMfaMethod.user_id == user.id,
+            UserMfaMethod.method_type == "TOTP",
+            UserMfaMethod.is_enabled.is_(True),
+        ).limit(1)
+    ) is not None
+    creator = db.get(User, user.created_by) if user.created_by else None
+
+    return {
+        "user": {
+            "id": user.id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role,
+            "account_status": user.account_status,
+            "employee_code": user.employee_code,
+            "department": user.department,
+            "job_title": user.job_title,
+            "phone": user.phone,
+            "location": user.location,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "email_verified_at": user.email_verified_at,
+            "last_login_at": user.last_login_at,
+            "password_changed_at": user.password_changed_at,
+            "created_by": creator.full_name if creator else None,
+        },
+        "summary": {
+            "owned_documents": document_metrics["owned"],
+            "shared_documents": document_metrics["shared"],
+            "documents_uploaded": activity_metrics["uploads"],
+            "documents_downloaded": activity_metrics["downloads"],
+            "documents_shared": activity_metrics["shares"],
+            "documents_edited": activity_metrics["edits"],
+            "documents_deleted": activity_metrics["deletions"],
+            "active_permissions": permission_metrics["active"],
+            "revoked_permissions": permission_metrics["revoked"],
+            "active_sessions": active_sessions,
+            "failed_login_attempts": user.failed_login_attempts,
+        },
+        "security": {
+            "two_factor_enabled": mfa_enabled,
+            "locked_until": user.locked_until,
+            "password_changed_at": user.password_changed_at,
+            "email_verified_at": user.email_verified_at,
+        },
+        "documents": [
+            {
+                "id": str(document.id),
+                "title": document.title,
+                "filename": document.current_version.original_filename if document.current_version else None,
+                "file_extension": document.current_version.file_extension if document.current_version else None,
+                "content_type": document.current_version.content_type if document.current_version else None,
+                "size_bytes": document.current_version.size_bytes if document.current_version else None,
+                "owner_id": str(document.owner_user_id),
+                "owner_name": document.owner.full_name,
+                "access": "Owned" if document.owner_user_id == user.id else "Shared with user",
+                "document_status": document.status,
+                "version_status": document.current_version.status if document.current_version else None,
+                "storage_reference_configured": bool(
+                    document.current_version
+                    and document.current_version.storage_bucket
+                    and document.current_version.storage_key
+                ),
+                "updated_at": document.updated_at,
+            }
+            for document in documents
+        ],
+        "documents_total": accessible_document_total,
+        "documents_limit": 100,
+        "permissions": permissions,
+        "permissions_limit": 200,
+        "events": events,
+        "sessions": sessions,
+    }
 
 
 @admin_router.patch(

@@ -117,7 +117,7 @@ function LoginField({ id, label, type, placeholder, value, onChange, error, trai
   )
 }
 
-function BrandingSection() {
+function BrandingSection({ label = 'WORKSPACE / SIGN IN' }) {
   return (
     <section className="login-brand-panel">
       <header className="login-brand-header">
@@ -125,7 +125,7 @@ function BrandingSection() {
           <BrandMark />
           <span>SureDocs</span>
         </div>
-        <span className="login-micro-label">WORKSPACE / SIGN IN</span>
+        <span className="login-micro-label">{label}</span>
       </header>
       <div className="login-illustration-wrap">
         <AccessIllustration />
@@ -359,9 +359,9 @@ function LoginForm({ onLogin }) {
               />
               <span>Remember me</span>
             </label>
-            <span aria-disabled="true" className="login-link login-unavailable">
+            <a className="login-link" href="/forgot-password">
               Forgot password?
-            </span>
+            </a>
           </div>
           <button
             className="login-submit"
@@ -378,12 +378,6 @@ function LoginForm({ onLogin }) {
             {notice}
           </p>
         </form>
-        <p className="login-support">
-          Having trouble signing in?{' '}
-          <span aria-disabled="true" className="login-unavailable">
-            Contact support.
-          </span>
-        </p>
       </div>
       <footer className="login-footer">
         <span>© 2026 SureDocs</span>
@@ -395,6 +389,220 @@ function LoginForm({ onLogin }) {
         </span>
       </footer>
     </section>
+  )
+}
+
+function RecoveryEmailIcon() {
+  return <svg aria-hidden="true" className="login-recovery-icon" fill="none" viewBox="0 0 20 20"><rect x="2.5" y="4" width="15" height="12" rx="1.2" stroke="currentColor" strokeWidth="1.3" /><path d="m3.5 5 6.5 5.2L16.5 5" stroke="currentColor" strokeWidth="1.3" /></svg>
+}
+
+function RecoveryLockIcon() {
+  return <svg aria-hidden="true" className="login-recovery-lock" fill="none" viewBox="0 0 16 18"><rect x="2" y="7" width="12" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.3" /><path d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2m-3.5 3v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>
+}
+
+function RecoveryPasswordField({ id, label, value, onChange, error, show, onToggle }) {
+  return (
+    <div className="login-field">
+      <label className="login-field-label" htmlFor={id}>{label}</label>
+      <div className={`login-input-wrap login-recovery-input-wrap${error ? ' has-error' : ''}`}>
+        <input
+          aria-describedby={error ? `${id}-error` : undefined}
+          aria-invalid={Boolean(error)}
+          aria-required="true"
+          autoComplete="new-password"
+          className="login-input"
+          id={id}
+          maxLength={128}
+          onChange={onChange}
+          type={show ? 'text' : 'password'}
+          value={value}
+        />
+        <button
+          aria-label={show ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          className="login-eye-button"
+          onClick={onToggle}
+          tabIndex={-1}
+          type="button"
+        >
+          {show ? <EyeOffIcon /> : <EyeIcon />}
+        </button>
+      </div>
+      {error && <p className="login-field-error" id={`${id}-error`}>{error}</p>}
+    </div>
+  )
+}
+
+function ForgotPasswordForm() {
+  const [email, setEmail] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    const normalizedEmail = email.trim()
+    if (!normalizedEmail) {
+      setError('Please enter your work email.')
+      return
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError('Please enter a valid email address.')
+      return
+    }
+
+    setError('')
+    setNotice('')
+    setLoading(true)
+    try {
+      await apiPost('/api/auth/forgot-password', { email: normalizedEmail })
+      setSubmitted(true)
+    } catch (requestError) {
+      setNotice(requestError.status === 429
+        ? 'Too many requests. Please wait and try again.'
+        : 'Password recovery is temporarily unavailable. Please try again later.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section className="login-form-panel login-recovery-panel">
+      <p className="login-admin-notice">Access is managed by your organization's administrator.</p>
+      <div className="login-form-content">
+        <h1>Forgot password?</h1>
+        <p className="login-form-subtitle">Enter your work email and we’ll send you a password reset link.</p>
+        {submitted ? (
+          <div className="login-recovery-result">
+            <p className="login-recovery-confirmation" role="status"><RecoveryLockIcon /> If an account exists for this email, we’ll send reset instructions.</p>
+            <a className="login-recovery-back" href="/">← Back to sign in</a>
+          </div>
+        ) : (
+          <form noValidate onSubmit={handleSubmit}>
+            <div className="login-field">
+              <label className="login-field-label" htmlFor="recovery-email">Work email</label>
+              <div className={`login-input-wrap login-recovery-input-wrap${error ? ' has-error' : ''}`}>
+                <RecoveryEmailIcon />
+                <input
+                  aria-describedby={error ? 'recovery-email-error' : undefined}
+                  aria-invalid={Boolean(error)}
+                  aria-required="true"
+                  autoComplete="email"
+                  className="login-input"
+                  id="recovery-email"
+                  maxLength={320}
+                  onChange={(event) => { setEmail(event.target.value); setError(''); setNotice('') }}
+                  placeholder="you@company.com"
+                  type="email"
+                  value={email}
+                />
+              </div>
+              {error && <p className="login-field-error" id="recovery-email-error">{error}</p>}
+            </div>
+            <button className="login-submit" disabled={loading} type="submit">
+              {loading ? <SpinnerIcon /> : 'Send reset link →'}
+            </button>
+            <p aria-live="polite" className={`login-notice${notice ? ' has-notice' : ''}`} role="alert">{notice}</p>
+            <a className="login-recovery-back" href="/">← Back to sign in</a>
+            <p className="login-recovery-security"><RecoveryLockIcon /> If an account exists for this email, we’ll send reset instructions.</p>
+          </form>
+        )}
+      </div>
+      <LoginFooter />
+    </section>
+  )
+}
+
+function ResetPasswordForm({ onPasswordReset }) {
+  const [token] = useState(() => new URLSearchParams(window.location.search).get('token') || '')
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [fieldError, setFieldError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [completed, setCompleted] = useState(false)
+  const [invalidToken, setInvalidToken] = useState(token.length < 32 || token.length > 128)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (window.location.search) window.history.replaceState(null, '', '/reset-password')
+  }, [])
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (!token || invalidToken) return
+    if (password.length < 10 || password.length > 128) {
+      setFieldError('Password must be between 10 and 128 characters.')
+      return
+    }
+    if (password !== confirmation) {
+      setFieldError('Passwords do not match.')
+      return
+    }
+    setFieldError('')
+    setNotice('')
+    setLoading(true)
+    try {
+      await apiPost('/api/auth/reset-password', { token, new_password: password })
+      setCompleted(true)
+      onPasswordReset()
+    } catch (requestError) {
+      if (requestError.status === 400 || requestError.status === 422) {
+        setInvalidToken(true)
+      } else {
+        setNotice(requestError.status === 429
+          ? 'Too many attempts. Please wait and try again.'
+          : 'Password reset is temporarily unavailable. Please try again later.')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section className="login-form-panel login-recovery-panel">
+      <p className="login-admin-notice">Access is managed by your organization's administrator.</p>
+      <div className="login-form-content">
+        <h1>Reset your password</h1>
+        <p className="login-form-subtitle">Create a new password for your SureDocs account.</p>
+        {completed ? (
+          <div className="login-recovery-result">
+            <p className="login-recovery-confirmation" role="status">Your password has been reset successfully.</p>
+            <a className="login-submit login-recovery-signin" href="/">Sign in to SureDocs →</a>
+          </div>
+        ) : invalidToken ? (
+          <div className="login-recovery-result">
+            <p className="login-field-error" role="alert">This reset link is invalid, expired, or already used.</p>
+            <a className="login-recovery-back" href="/forgot-password">Request a new reset link</a>
+          </div>
+        ) : (
+          <form noValidate onSubmit={handleSubmit}>
+            <RecoveryPasswordField id="new-password" label="New password" value={password} onChange={(event) => { setPassword(event.target.value); setFieldError('') }} error={fieldError} show={showPassword} onToggle={() => setShowPassword((value) => !value)} />
+            <RecoveryPasswordField id="confirm-password" label="Confirm new password" value={confirmation} onChange={(event) => { setConfirmation(event.target.value); setFieldError('') }} error={fieldError && password !== confirmation ? fieldError : ''} show={showConfirmation} onToggle={() => setShowConfirmation((value) => !value)} />
+            <p className="login-recovery-password-hint">Use 10–128 characters.</p>
+            <button className="login-submit" disabled={loading} type="submit">{loading ? <SpinnerIcon /> : 'Reset password →'}</button>
+            <p aria-live="polite" className={`login-notice${notice ? ' has-notice' : ''}`} role="alert">{notice}</p>
+            <a className="login-recovery-back" href="/">← Back to sign in</a>
+          </form>
+        )}
+      </div>
+      <LoginFooter />
+    </section>
+  )
+}
+
+function LoginFooter() {
+  return (
+    <footer className="login-footer">
+      <span>© 2026 SureDocs</span>
+      <span className="login-encrypted">
+        <svg aria-hidden="true" viewBox="0 0 12 14">
+          <path d="M3 6V4a3 3 0 0 1 6 0v2M2 6h8v7H2z" fill="currentColor" />
+        </svg>
+        ENCRYPTED SESSION
+      </span>
+    </footer>
   )
 }
 
@@ -468,7 +676,7 @@ function App() {
     sessionCheckRef.current = null
     setChecking(false)
     setUser(authenticatedUser)
-    const target = authenticatedUser.role === 'ADMIN' ? '/admin/security' : '/employee'
+    const target = authenticatedUser.role === 'ADMIN' ? '/admin' : '/employee'
     window.history.pushState(null, '', target)
     setPath(target)
   }
@@ -477,6 +685,25 @@ function App() {
   // The public sign-in screen can render while this request runs in the background.
   if (checking && (path.startsWith('/admin') || path.startsWith('/employee'))) {
     return <DashboardLoading />
+  }
+
+  // Protected admin routes
+  if (path === '/forgot-password') {
+    return (
+      <main className="login-page">
+        <BrandingSection label="WORKSPACE / ACCOUNT RECOVERY" />
+        <ForgotPasswordForm />
+      </main>
+    )
+  }
+
+  if (path === '/reset-password') {
+    return (
+      <main className="login-page">
+        <BrandingSection label="WORKSPACE / ACCOUNT RECOVERY" />
+        <ResetPasswordForm onPasswordReset={() => setUser(null)} />
+      </main>
+    )
   }
 
   // Protected admin routes
@@ -525,7 +752,7 @@ function App() {
 
   // Root path: if authenticated, redirect to dashboard
   if (user) {
-    const target = user.role === 'ADMIN' ? '/admin/security' : '/employee'
+    const target = user.role === 'ADMIN' ? '/admin' : '/employee'
     window.history.replaceState(null, '', target)
     if (user.role === 'ADMIN') {
       return (

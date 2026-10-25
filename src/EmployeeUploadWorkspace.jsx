@@ -277,6 +277,18 @@ export default function EmployeeUploadWorkspace() {
         body.append('classification', 'CONFIDENTIAL')
         tags.forEach((tag) => body.append('tags', tag))
         savedDocument = await apiUpload('/api/documents/upload', body, { onProgress: setProgress })
+        if (savedDocument.latest_uploaded_version_status === 'QUARANTINED') {
+          setError(savedDocument.scan_message || 'Upload blocked: the file failed the security scan.')
+          resetForm()
+          await loadRecent()
+          return
+        }
+        if (savedDocument.latest_uploaded_version_status === 'PENDING_SCAN' || savedDocument.latest_uploaded_version_status === 'FAILED') {
+          setError(savedDocument.scan_message || 'Security scanning is temporarily unavailable. Please try again later.')
+          resetForm()
+          await loadRecent()
+          return
+        }
         setCreatedDocument(savedDocument)
         await loadRecent()
       }
@@ -301,8 +313,8 @@ export default function EmployeeUploadWorkspace() {
       }
 
       setSuccess(accessMode === 'share'
-        ? 'Document uploaded and shared successfully.'
-        : 'Document uploaded successfully.')
+        ? 'Document uploaded, security scan passed, and shared successfully.'
+        : 'Document uploaded and security scan passed.')
       resetForm()
       await loadRecent()
     } catch (requestError) {
@@ -354,7 +366,7 @@ export default function EmployeeUploadWorkspace() {
               <span className="employee-upload-formats">Supported formats: PDF, DOCX, XLSX, PPTX, TXT</span>
               <span className="employee-upload-limit">Maximum file size: 50 MB</span>
             </>}
-            {busy && !createdDocument && <div className="employee-upload-progress" role="status"><span style={{ width: `${progress}%` }} /><small>Uploading {progress}%</small></div>}
+            {busy && !createdDocument && <div className="employee-upload-progress" role="status"><span style={{ width: `${progress}%` }} /><small>{progress === 100 ? 'Scanning for malware…' : `Uploading ${progress}%`}</small></div>}
           </div>
 
           <section aria-labelledby="upload-recent-heading" className="employee-upload-recent">
@@ -449,7 +461,7 @@ export default function EmployeeUploadWorkspace() {
           <footer className="employee-upload-form-actions">
             <a aria-disabled={busy ? 'true' : undefined} className="employee-upload-cancel" href={busy ? undefined : '/employee/documents'}>Cancel</a>
             <button className="employee-upload-submit" disabled={busy} type="submit">
-              {busy ? <><span className="employee-upload-spinner" />{createdDocument ? 'Sharing…' : 'Uploading…'}</> : createdDocument ? 'Retry Sharing' : <><Icon name="upload" />Upload Document</>}
+              {busy ? <><span className="employee-upload-spinner" />{createdDocument ? 'Sharing…' : progress === 100 ? 'Scanning for malware…' : 'Uploading…'}</> : createdDocument ? 'Retry Sharing' : <><Icon name="upload" />Upload Document</>}
             </button>
           </footer>
         </form>

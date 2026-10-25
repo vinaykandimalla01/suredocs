@@ -118,3 +118,15 @@ CLAMAV_STREAM_CHUNK_BYTES: int = 64 * 1024
 
 PASSWORD_MIN_LENGTH: int = 10
 PASSWORD_MAX_LENGTH: int = 128
+
+# ---------------------------------------------------------------------------
+# Password recovery email
+# ---------------------------------------------------------------------------
+
+SMTP_HOST: str | None = os.getenv("SUREDOCS_SMTP_HOST") or None
+SMTP_PORT: int = int(os.getenv("SUREDOCS_SMTP_PORT", "587"))
+SMTP_USERNAME: str | None = os.getenv("SUREDOCS_SMTP_USERNAME") or None
+SMTP_PASSWORD: str | None = os.getenv("SUREDOCS_SMTP_PASSWORD") or None
+SMTP_FROM_EMAIL: str | None = os.getenv("SUREDOCS_SMTP_FROM_EMAIL") or None
+PUBLIC_APP_URL: str | None = os.getenv("SUREDOCS_PUBLIC_APP_URL") or None
+PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 30 * 60

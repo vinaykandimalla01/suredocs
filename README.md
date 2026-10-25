@@ -20,14 +20,31 @@ SureDocs is a secure document-sharing platform with a FastAPI backend, SQLAlchem
    ```bash
    cp .env.example .env
    ```
-4. Ensure the database is running and the `suredocs_app` password file exists under `secrets/`.
-5. Apply migrations:
+4. Start Docker Compose services (PostgreSQL and ClamAV):
+   ```bash
+   docker compose up -d
+   ```
+   To start only ClamAV:
+   ```bash
+   docker compose up -d clamav
+   ```
+   Verify scanner health and status:
+   ```bash
+   docker compose ps clamav
+   docker inspect --format='{{json .State.Health}}' suredocs-clamav-1
+   ```
+   Inspect ClamAV daemon and freshclam logs:
+   ```bash
+   docker compose logs -f clamav
+   ```
+5. Ensure the database is running and the `suredocs_app` password file exists under `secrets/`.
+6. Apply migrations:
    ```bash
    cd backend
    . .venv/bin/activate
    alembic upgrade head
    ```
-6. Bootstrap the initial admin account if needed:
+7. Bootstrap the initial admin account if needed:
    ```bash
    python -m app.cli create-admin
    ```
@@ -73,10 +90,16 @@ npm run dev
 
 Then open `http://localhost:5173`.
 
-## Verify upload behavior
+## Verify upload and antivirus scanning behavior
 
-- Upload a document from the web UI and confirm it appears in the real document list.
-- Confirm the file is stored in the configured private bucket and the database record references the correct bucket/object key.
+- Run the automated test suite covering ClamAV integration, quarantine, fail-closed handling, and EICAR detection:
+  ```bash
+  cd backend
+  . .venv/bin/activate
+  pytest tests/test_clamav_e2e.py -v
+  ```
+- Upload a clean document from the web UI and confirm it passes scanning and is promoted to trusted storage.
+- Upload an EICAR test string (`eicar.txt`) and confirm the upload is blocked with `Upload blocked: the file failed the security scan.` and quarantined.
 - Re-run the bulk import script to verify it skips already imported documents instead of creating duplicates.
 
 ## Notes

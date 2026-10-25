@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { apiDelete, apiGet, apiGetFile, apiPost, apiUpload } from './api.js'
+import DocumentViewer from './DocumentViewer.jsx'
 import {
   Area,
   AreaChart,
@@ -16,7 +18,6 @@ import {
 import {
   aggregateDataNote,
   bytesLabel,
-  categoryCounts,
   documentUsers,
   getEventsForDocument,
   getPermissionsForDocument,
@@ -32,7 +33,7 @@ import './AdminDocumentsWorkspace.css'
 
 const registryPageSizes = [10, 20, 50]
 const statusValues = ['Active', 'Archived']
-const accessValues = ['Read', 'Edit', 'Download', 'None']
+const accessValues = ['Shared', 'Private']
 const permissionAccessValues = ['Read', 'Edit', 'Download']
 const trendColors = { total: '#377cf6', owned: '#22a879', shared: '#8b5de5' }
 
@@ -76,14 +77,35 @@ function formatDate(value, includeTime = false) {
   }).format(new Date(value))
 }
 
-function documentAccessLevel(document, permissions) {
-  const activeLevels = getPermissionsForDocument(permissions, document.id)
-    .filter((permission) => permission.status === 'Active')
-    .map((permission) => permission.accessLevel)
-  if (activeLevels.includes('Download')) return 'Download'
-  if (activeLevels.includes('Edit')) return 'Edit'
-  if (activeLevels.includes('Read')) return 'Read'
-  return 'None'
+function documentAccessLevel(document) {
+  return document.activeUserCount > 0 ? 'Shared' : 'Private'
+}
+
+function categoryClass(category) {
+  return category.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+}
+
+function normalizeRegistryDocument(record) {
+  const filename = record.original_filename ?? record.title
+  const extension = filename.includes('.') ? filename.split('.').pop().toUpperCase() : 'FILE'
+  const ownerName = record.owner_name || 'Unknown owner'
+  return {
+    ...record,
+    documentId: record.id,
+    name: record.title,
+    ownerId: record.owner_user_id,
+    ownerName,
+    ownerEmail: record.owner_email ?? '',
+    ownerInitials: ownerName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
+    category: record.category || 'Uncategorized',
+    uploadDate: record.created_at,
+    lastModified: record.updated_at,
+    fileType: extension,
+    fileSizeBytes: record.size_bytes ?? 0,
+    status: record.status[0] + record.status.slice(1).toLowerCase(),
+    description: record.description || '',
+    activeUserCount: record.permission_count ?? 0,
+  }
 }
 
 function Avatar({ user, small = false }) {
@@ -106,7 +128,7 @@ function AccessBadge({ level }) {
 }
 
 function MiniSparkline({ color, variant = 0 }) {
-  const paths = ['M2 24 C16 23 19 17 30 18 S44 13 54 14 S70 7 86 4', 'M2 21 C12 18 19 20 28 15 S42 18 52 11 S68 12 86 3', 'M2 24 C13 22 18 11 29 14 S42 8 52 10 S68 6 86 3', 'M2 22 C14 20 20 15 29 17 S43 12 54 13 S69 6 86 4']
+  const paths = ['M2 24 C16 23 19 17 30 18 S44 13 54 14 S70 7 86 4', 'M2 21 C12 18 19 20 28 15 S42 18 52 11 S68 12 86 3', 'M2 24 C13 22 18 11 29 14 S42 8 52 10 S68 6 86 3', 'M2 22 C14 20 20 15 29 17 S43 12 54 13 S69 6 86 4', 'M2 14 H86']
   return <svg aria-hidden="true" className="docs-sparkline" viewBox="0 0 88 28"><path d={paths[variant % paths.length]} fill="none" stroke={color} strokeLinecap="round" strokeWidth="2" /></svg>
 }
 
@@ -229,17 +251,17 @@ function ChartGrid({ scope, range }) {
   return <div className="docs-analytics-grid"><TrendChart color={trendColors[scope]} range={range} scope={scope} /><CategoryDonut color={trendColors[scope]} scope={scope} /><FileTypeChart scope={scope} /></div>
 }
 
-function CategorySidebar({ selected, onSelect }) {
+function CategorySidebar({ categories, selected, total, onSelect }) {
   return (
     <aside className="docs-category-sidebar">
       <div className="docs-category-heading"><span>Categories</span><button aria-label="Show all categories" onClick={() => onSelect('all')} type="button"><Icon name="filter" /></button></div>
-      <button aria-pressed={selected === 'all'} className={`docs-category-item${selected === 'all' ? ' is-selected' : ''}`} onClick={() => onSelect('all')} type="button"><span className="docs-category-symbol is-all"><Icon name="document" /></span><span>All Documents</span><b>{organizationDocumentMetrics.total.toLocaleString()}</b></button>
-      {categoryCounts.map((item, index) => <button aria-pressed={selected === item.name} className={`docs-category-item${selected === item.name ? ' is-selected' : ''}`} key={item.name} onClick={() => onSelect(item.name)} type="button"><span className={`docs-category-symbol tone-${index}`}><i /></span><span>{item.name}</span><b>{item.count.toLocaleString()}</b></button>)}
+      <button aria-pressed={selected === 'all'} className={`docs-category-item${selected === 'all' ? ' is-selected' : ''}`} onClick={() => onSelect('all')} type="button"><span className="docs-category-symbol is-all"><Icon name="document" /></span><span>All Documents</span><b>{total == null ? '—' : total.toLocaleString()}</b></button>
+      {categories.map((item, index) => <button aria-pressed={selected === item.name} className={`docs-category-item${selected === item.name ? ' is-selected' : ''}`} key={item.name} onClick={() => onSelect(item.name)} type="button"><span className={`docs-category-symbol tone-${index % 7}`}><i /></span><span>{item.name}</span><b>{item.count.toLocaleString()}</b></button>)}
     </aside>
   )
 }
 
-function DocumentTable({ rows, selectedIds, onSelectedIdsChange, onOpenDocument, permissions, view = 'total', layout, onLayoutChange, sortKey, sortDirection, onSort, page, pageSize, onPageChange, onPageSizeChange, search, onSearchChange, category, onCategoryChange, status, onStatusChange, access, onAccessChange, fileType, onFileTypeChange, owner, onOwnerChange, onReset, filteredCount, showSharedWith = false, showAccessLevel = false, showOwnerFilter = false }) {
+function DocumentTable({ rows, selectedIds, onSelectedIdsChange, onOpenDocument, view = 'total', registryScope = 'all', layout, onLayoutChange, sortKey, sortDirection, onSort, page, pageSize, onPageChange, onPageSizeChange, search, onSearchChange, categories, category, onCategoryChange, status, onStatusChange, access, onAccessChange, fileType, onFileTypeChange, owner, onOwnerChange, onReset, onRetry, loading, error, filteredCount, showSharedWith = false, showAccessLevel = false, showOwnerFilter = false }) {
   const currentPageIds = rows.map((document) => document.id)
   const selectedOnPage = currentPageIds.length > 0 && currentPageIds.every((id) => selectedIds.includes(id))
   const firstRow = filteredCount === 0 ? 0 : (page - 1) * pageSize + 1
@@ -261,16 +283,16 @@ function DocumentTable({ rows, selectedIds, onSelectedIdsChange, onOpenDocument,
 
   function openFromRow(event, document) {
     if (event.target.closest('button, input, a, select, label')) return
-    onOpenDocument(document.id)
+    onOpenDocument(document)
   }
 
   const toolbar = (
     <>
       <div className="docs-registry-toolbar">
         <label className="docs-searchbox"><Icon name="search" /><span className="sr-only">Search documents</span><input aria-label="Search documents by name, owner, category, or metadata" onChange={(event) => onSearchChange(event.target.value)} placeholder="Search documents..." type="search" value={search} /></label>
-        <select aria-label="Filter by category" className="docs-inline-filter is-category" onChange={(event) => onCategoryChange(event.target.value)} value={category}><option value="all">All Categories</option>{categoryCounts.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select>
+        <select aria-label="Filter by category" className="docs-inline-filter is-category" onChange={(event) => onCategoryChange(event.target.value)} value={category}><option value="all">All Categories</option>{categories.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select>
         <select aria-label="Filter by status" className="docs-inline-filter is-status" onChange={(event) => onStatusChange(event.target.value)} value={status}><option value="all">All Status</option>{statusValues.map((item) => <option key={item} value={item}>{item}</option>)}</select>
-        <select aria-label="Filter by access level" className="docs-inline-filter is-access" onChange={(event) => onAccessChange(event.target.value)} value={access}><option value="all">All Access Levels</option>{accessValues.map((item) => <option key={item} value={item}>{item === 'None' ? 'No active access' : item}</option>)}</select>
+        <select aria-label="Filter by access level" className="docs-inline-filter is-access" onChange={(event) => onAccessChange(event.target.value)} value={access}><option value="all">All Access Levels</option>{accessValues.map((item) => <option key={item} value={item}>{item}</option>)}</select>
         {view !== 'main' && <select aria-label="Filter by file type" className="docs-inline-filter is-file-type" onChange={(event) => onFileTypeChange(event.target.value)} value={fileType}><option value="all">All File Types</option>{['PDF', 'DOCX', 'XLSX', 'PPTX', 'TXT', 'ZIP', 'PNG', 'CSV'].map((item) => <option key={item} value={item}>{item}</option>)}</select>}
         {showOwnerFilter && <select aria-label="Filter by owner" className="docs-inline-filter is-owner" onChange={(event) => onOwnerChange(event.target.value)} value={owner}><option value="all">All Owners</option>{documentUsers.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>}
         <div aria-label="Document view" className="docs-view-toggle" role="group"><button aria-label="List view" aria-pressed={layout === 'list'} className={layout === 'list' ? 'is-selected' : ''} onClick={() => onLayoutChange('list')} type="button"><Icon name="list" /></button><button aria-label="Grid view" aria-pressed={layout === 'grid'} className={layout === 'grid' ? 'is-selected' : ''} onClick={() => onLayoutChange('grid')} type="button"><Icon name="grid" /></button></div>
@@ -281,30 +303,29 @@ function DocumentTable({ rows, selectedIds, onSelectedIdsChange, onOpenDocument,
   )
 
   const tableRows = rows.map((document) => {
-    const ownerUser = documentUsers.find((person) => person.id === document.ownerId)
-    const grants = getPermissionsForDocument(permissions, document.id).filter((grant) => grant.status === 'Active')
+    const ownerUser = { id: document.ownerId, name: document.ownerName, initials: document.ownerInitials }
     return (
-      <tr aria-label={`Open ${document.name}`} className="docs-table-row" key={document.id} onClick={(event) => openFromRow(event, document)} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenDocument(document.id) } }} tabIndex={0}>
+      <tr aria-label={`Open ${document.name}`} className="docs-table-row" key={document.id} onClick={(event) => openFromRow(event, document)} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenDocument(document) } }} tabIndex={0}>
         <td><input aria-label={`Select ${document.name}`} checked={selectedIds.includes(document.id)} onChange={() => toggleOne(document.id)} onClick={(event) => event.stopPropagation()} type="checkbox" /></td>
-        <td className="docs-name-cell"><div className="docs-name-line"><FileTypeIcon fileType={document.fileType} /><button className="docs-document-name" onClick={() => onOpenDocument(document.id)} type="button">{document.name}</button></div><span className="docs-document-description">{document.description}</span></td>
+        <td className="docs-name-cell"><div className="docs-name-line"><FileTypeIcon fileType={document.fileType} /><button className="docs-document-name" onClick={() => onOpenDocument(document)} type="button">{document.name}</button></div><span className="docs-document-description">{document.description}</span></td>
         <td><span className="docs-owner-cell"><Avatar small user={ownerUser} /><span><b>{document.ownerName}</b><small>{document.ownerEmail}</small></span></span></td>
-        <td><span className={`docs-category-pill cat-${document.category.toLowerCase()}`}>{document.category}</span></td>
-        {showSharedWith && <td><span className="docs-shared-avatars">{grants.slice(0, 3).map((grant) => <Avatar key={grant.id} small user={documentUsers.find((person) => person.id === grant.userId)} />)}{grants.length > 3 && <span className="docs-avatar docs-avatar-more">+{grants.length - 3}</span>}</span></td>}
+        <td><span className={`docs-category-pill cat-${categoryClass(document.category)}`}>{document.category}</span></td>
+        {showSharedWith && <td><span className="docs-active-count">{document.activeUserCount}<small>users</small></span></td>}
         <td>{formatDate(document.uploadDate)}</td>
         <td>{formatDate(document.lastModified)}</td>
         <td><span className="docs-type-cell"><FileTypeIcon fileType={document.fileType} /><small>{document.fileType}</small></span></td>
         <td className="docs-size-cell">{bytesLabel(document.fileSizeBytes)}</td>
         <td><StatusBadge status={document.status} /></td>
-        {showAccessLevel && <td><AccessBadge level={documentAccessLevel(document, permissions)} /></td>}
-        <td><span className="docs-active-count">{grants.length}<small>users</small></span></td>
-        <td><button aria-label={`View details for ${document.name}`} className="docs-row-action" onClick={() => onOpenDocument(document.id)} type="button"><Icon name="eye" /><span>View</span></button></td>
+        {showAccessLevel && <td><AccessBadge level={documentAccessLevel(document)} /></td>}
+        <td><span className="docs-active-count">{document.activeUserCount}<small>users</small></span></td>
+        <td><button aria-label={`View details for ${document.name}`} className="docs-row-action" onClick={() => onOpenDocument(document)} type="button"><Icon name="eye" /><span>View</span></button></td>
       </tr>
     )
   })
 
   return (
     <section className="docs-panel docs-registry-panel">
-      <div className="docs-registry-heading"><div><h2>{view === 'owned' ? 'Owned document registry' : view === 'shared' ? 'Shared document registry' : 'Document registry'}</h2><p>Showing {firstRow}–{lastRow} of {filteredCount} sample records</p></div>{view !== 'main' && <span className="docs-sample-count">{filteredCount} records</span>}</div>
+      <div className="docs-registry-heading"><div><h2>{registryScope === 'owned' ? 'Your owned documents' : registryScope === 'shared' ? 'Documents shared with you' : view === 'owned' ? 'Owned document registry' : view === 'shared' ? 'Shared document registry' : 'Document registry'}</h2><p>{loading ? 'Loading database records…' : error ? 'Registry unavailable' : `Showing ${firstRow}–${lastRow} of ${filteredCount} database records`}</p></div>{view !== 'main' && <span className="docs-sample-count">{filteredCount} records</span>}</div>
       {toolbar}
       {layout === 'list' ? (
         <div className="docs-table-scroll">
@@ -318,30 +339,29 @@ function DocumentTable({ rows, selectedIds, onSelectedIdsChange, onOpenDocument,
             </tr></thead>
             <tbody>{tableRows}</tbody>
           </table>
-          {rows.length === 0 && <div className="docs-empty-state"><span><Icon name="search" /></span><h3>No documents match these filters</h3><p>Clear a filter or try another search term.</p><button onClick={onReset} type="button">Reset filters</button></div>}
+          {loading ? <div aria-live="polite" className="docs-empty-state"><h3>Loading documents…</h3></div> : error ? <div className="docs-empty-state" role="alert"><h3>Documents could not be loaded</h3><p>{error}</p><button onClick={onRetry} type="button">Try again</button></div> : rows.length === 0 && <div className="docs-empty-state"><span><Icon name="search" /></span><h3>No documents match these filters</h3><p>Clear a filter or try another search term.</p><button onClick={onReset} type="button">Reset filters</button></div>}
         </div>
       ) : (
         <div className="docs-card-grid">
           {rows.map((document) => {
-            const ownerUser = documentUsers.find((person) => person.id === document.ownerId)
-            const grants = getPermissionsForDocument(permissions, document.id).filter((grant) => grant.status === 'Active')
+            const ownerUser = { id: document.ownerId, name: document.ownerName, initials: document.ownerInitials }
             return <article className="docs-document-card" key={document.id}>
               <div className="docs-document-card-top"><FileTypeIcon fileType={document.fileType} /><input aria-label={`Select ${document.name}`} checked={selectedIds.includes(document.id)} onChange={() => toggleOne(document.id)} type="checkbox" /></div>
-              <button className="docs-document-card-name" onClick={() => onOpenDocument(document.id)} type="button">{document.name}</button>
+              <button className="docs-document-card-name" onClick={() => onOpenDocument(document)} type="button">{document.name}</button>
               <p>{document.description}</p>
-              <div className="docs-document-card-meta"><span><Avatar small user={ownerUser} />{document.ownerName}</span><span className={`docs-category-pill cat-${document.category.toLowerCase()}`}>{document.category}</span></div>
-              <div className="docs-document-card-foot"><StatusBadge status={document.status} /><span>{bytesLabel(document.fileSizeBytes)} · {grants.length} active</span><button aria-label={`Open ${document.name}`} onClick={() => onOpenDocument(document.id)} type="button"><Icon name="arrow" /></button></div>
+              <div className="docs-document-card-meta"><span><Avatar small user={ownerUser} />{document.ownerName}</span><span className={`docs-category-pill cat-${categoryClass(document.category)}`}>{document.category}</span></div>
+              <div className="docs-document-card-foot"><StatusBadge status={document.status} /><span>{bytesLabel(document.fileSizeBytes)} · {document.activeUserCount} active</span><button aria-label={`Open ${document.name}`} onClick={() => onOpenDocument(document)} type="button"><Icon name="arrow" /></button></div>
             </article>
           })}
-          {rows.length === 0 && <div className="docs-empty-state"><span><Icon name="search" /></span><h3>No documents match these filters</h3><p>Clear a filter or try another search term.</p><button onClick={onReset} type="button">Reset filters</button></div>}
+          {loading ? <div aria-live="polite" className="docs-empty-state"><h3>Loading documents…</h3></div> : error ? <div className="docs-empty-state" role="alert"><h3>Documents could not be loaded</h3><p>{error}</p><button onClick={onRetry} type="button">Try again</button></div> : rows.length === 0 && <div className="docs-empty-state"><span><Icon name="search" /></span><h3>No documents match these filters</h3><p>Clear a filter or try another search term.</p><button onClick={onReset} type="button">Reset filters</button></div>}
         </div>
       )}
-      <footer className="docs-pagination"><span>Rows per page <select aria-label="Rows per page" onChange={(event) => onPageSizeChange(Number(event.target.value))} value={pageSize}>{registryPageSizes.map((size) => <option key={size} value={size}>{size}</option>)}</select></span><span>{firstRow}–{lastRow} of {filteredCount}</span><div><button aria-label="Previous page" disabled={page <= 1} onClick={() => onPageChange(page - 1)} type="button">‹</button><span>Page {page} of {pageCount}</span><button aria-label="Next page" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)} type="button">›</button></div></footer>
+      <footer className="docs-pagination"><span>Rows per page <select aria-label="Rows per page" onChange={(event) => onPageSizeChange(Number(event.target.value))} value={pageSize}>{registryPageSizes.map((size) => <option key={size} value={size}>{size}</option>)}</select></span><span>{firstRow}–{lastRow} of {filteredCount}</span><div><button aria-label="Previous page" disabled={loading || page <= 1} onClick={() => onPageChange(page - 1)} type="button">‹</button><span>Page {page} of {pageCount}</span><button aria-label="Next page" disabled={loading || page >= pageCount} onClick={() => onPageChange(page + 1)} type="button">›</button></div></footer>
     </section>
   )
 }
 
-function DocumentRegistry({ scope = 'main', category, onCategoryChange, permissions, onOpenDocument, onVisibleRowsChange }) {
+function DocumentRegistry({ scope = 'main', registryScope = 'all', onRegistryScopeChange, category, categories, onCategoryChange, onOpenDocument, onVisibleRowsChange, refreshKey = 0 }) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [access, setAccess] = useState('all')
@@ -353,50 +373,77 @@ function DocumentRegistry({ scope = 'main', category, onCategoryChange, permissi
   const [pageState, setPageState] = useState({ signature: '', value: 1 })
   const [pageSize, setPageSize] = useState(10)
   const [selectedIds, setSelectedIds] = useState([])
-
-  const filteredRows = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase()
-    const filtered = mockDocuments.filter((document) => {
-      if (scope === 'owned' && !document.isOwned) return false
-      if (scope === 'shared' && !document.isShared) return false
-      if (category !== 'all' && document.category !== category) return false
-      if (status !== 'all' && document.status !== status) return false
-      const accessLevel = documentAccessLevel(document, permissions)
-      if (access !== 'all' && accessLevel !== access) return false
-      if (fileType !== 'all' && document.fileType !== fileType) return false
-      if (owner !== 'all' && document.ownerId !== owner) return false
-      if (!query) return true
-      const sharedNames = getPermissionsForDocument(permissions, document.id)
-        .map((permission) => documentUsers.find((person) => person.id === permission.userId)?.name ?? '')
-        .join(' ')
-      const searchable = [document.name, document.description, document.ownerName, document.ownerEmail, document.category, document.fileType, document.status, accessLevel, ...document.tags, sharedNames]
-        .join(' ').toLocaleLowerCase()
-      return searchable.includes(query)
-    })
-
-    const valueFor = (document) => sortKey === 'activeUsers'
-      ? getPermissionsForDocument(permissions, document.id).filter((grant) => grant.status === 'Active').length
-      : document[sortKey]
-    return filtered.sort((first, second) => {
-      const firstValue = valueFor(first)
-      const secondValue = valueFor(second)
-      const comparison = typeof firstValue === 'number'
-        ? firstValue - secondValue
-        : String(firstValue ?? '').localeCompare(String(secondValue ?? ''), undefined, { numeric: true, sensitivity: 'base' })
-      return sortDirection === 'asc' ? comparison : -comparison
-    })
-  }, [access, category, fileType, owner, permissions, scope, search, sortDirection, sortKey, status])
-
-  const pageSignature = JSON.stringify([access, category, fileType, owner, search, scope, status, pageSize, permissions.map((item) => `${item.id}:${item.status}`).join('|')])
+  const [records, setRecords] = useState([])
+  const [filteredCount, setFilteredCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retryCount, setRetryCount] = useState(0)
+  const pageSignature = JSON.stringify([access, category, fileType, owner, pageSize, scope, search, sortDirection, sortKey, status])
   const page = pageState.signature === pageSignature ? pageState.value : 1
-  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize))
-  const visiblePage = Math.min(page, pageCount)
-  const pageRows = filteredRows.slice((visiblePage - 1) * pageSize, visiblePage * pageSize)
 
-  function changePage(value) {
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+      sort_by: ({
+        name: 'title',
+        ownerName: 'owner',
+        uploadDate: 'created_at',
+        lastModified: 'updated_at',
+        fileType: 'file_type',
+        fileSizeBytes: 'size_bytes',
+        activeUsers: 'active_users',
+      })[sortKey] || 'created_at',
+      sort_direction: sortDirection,
+    })
+    if (search.trim()) params.set('search', search.trim())
+    if (category !== 'all') params.set('category', category)
+    if (status !== 'all') params.set('status', status.toUpperCase())
+    if (access !== 'all') params.set('access_level', access.toUpperCase())
+    if (fileType !== 'all') params.set('file_type', fileType.toLowerCase())
+    if (owner !== 'all') params.set('owner_id', owner)
+    if (scope === 'shared' && access === 'all') params.set('access_level', 'SHARED')
+    if (registryScope !== 'all') {
+      params.set('registry_scope', registryScope === 'owned' ? 'OWNED' : 'SHARED_WITH_ME')
+    }
+
+    const delay = search.trim() ? 250 : 0
+    const timeout = window.setTimeout(() => {
+      setLoading(true)
+      setError('')
+      apiGet(`/api/documents/registry?${params}`, { signal: controller.signal })
+        .then((result) => {
+          if (!active) return
+          const lastPage = Math.max(1, Math.ceil(result.total / pageSize))
+          if (page > lastPage) setPageState({ signature: pageSignature, value: lastPage })
+          setRecords(result.items.map(normalizeRegistryDocument))
+          setFilteredCount(result.total)
+        })
+        .catch((requestError) => {
+          if (!active || requestError.name === 'AbortError') return
+          setError(requestError.message || 'The document registry is temporarily unavailable.')
+          setRecords([])
+          setFilteredCount(0)
+        })
+        .finally(() => {
+          if (active) setLoading(false)
+        })
+    }, delay)
+    return () => {
+      active = false
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [access, category, fileType, owner, page, pageSignature, pageSize, refreshKey, registryScope, retryCount, scope, search, sortDirection, sortKey, status])
+
+  const pageCount = Math.max(1, Math.ceil(filteredCount / pageSize))
+  const visiblePage = Math.min(page, pageCount)
+  function updatePage(value) {
     setPageState({ signature: pageSignature, value })
   }
-  useEffect(() => { onVisibleRowsChange?.(filteredRows) }, [filteredRows, onVisibleRowsChange])
+  useEffect(() => { onVisibleRowsChange?.(records) }, [records, onVisibleRowsChange])
 
   function reset() {
     setSearch('')
@@ -406,6 +453,8 @@ function DocumentRegistry({ scope = 'main', category, onCategoryChange, permissi
     setFileType('all')
     setOwner('all')
     setSelectedIds([])
+    onRegistryScopeChange?.('all')
+    updatePage(1)
   }
 
   function sortBy(key) {
@@ -414,23 +463,28 @@ function DocumentRegistry({ scope = 'main', category, onCategoryChange, permissi
       setSortKey(key)
       setSortDirection(key === 'name' || key === 'ownerName' ? 'asc' : 'desc')
     }
+    updatePage(1)
   }
 
   return <DocumentTable
     access={access}
     category={category}
-    filteredCount={filteredRows.length}
+    categories={categories}
+    filteredCount={filteredCount}
+    error={error}
     fileType={fileType}
     layout={layout}
+    loading={loading}
     onAccessChange={setAccess}
     onCategoryChange={onCategoryChange}
     onFileTypeChange={setFileType}
     onLayoutChange={setLayout}
     onOpenDocument={onOpenDocument}
     onOwnerChange={setOwner}
-    onPageChange={changePage}
+    onPageChange={updatePage}
     onPageSizeChange={setPageSize}
     onReset={reset}
+    onRetry={() => setRetryCount((value) => value + 1)}
     onSearchChange={setSearch}
     onSelectedIdsChange={setSelectedIds}
     onSort={sortBy}
@@ -438,15 +492,15 @@ function DocumentRegistry({ scope = 'main', category, onCategoryChange, permissi
     owner={owner}
     page={visiblePage}
     pageSize={pageSize}
-    permissions={permissions}
-    rows={pageRows}
+    rows={records}
+    registryScope={registryScope}
     search={search}
     selectedIds={selectedIds}
     showOwnerFilter={scope === 'owned'}
     showSharedWith={scope === 'shared'}
     showAccessLevel={scope === 'total' || scope === 'shared'}
     sortDirection={sortDirection}
-    sortKey={sortKey}
+    sortKey={sortKey === 'uploadDate' ? 'uploadDate' : sortKey}
     status={status}
     view={scope}
   />
@@ -456,7 +510,16 @@ function RateMetricCard({ label, value, detail, color, percent }) {
   return <div className="docs-metric-card docs-rate-card"><div className="docs-rate-ring" style={{ '--docs-rate': `${percent}%`, '--docs-rate-color': color }}><strong>{percent}%</strong></div><div className="docs-metric-copy"><span className="docs-metric-label">{label}</span><strong>{value}</strong><small>{detail}</small></div></div>
 }
 
-function MetricCards({ scope, navigate }) {
+function MetricCards({ scope, navigate, summary, loading, error = false, onViewDetails }) {
+  if (scope === 'main') {
+    const data = summary ?? {}
+    return <div className="docs-metric-grid is-four">
+      <MetricCard color="#377cf6" detail="Current registry records" icon="document" label="Total Documents" onClick={() => onViewDetails?.('all')} value={loading ? '…' : error ? '—' : Number(data.total_documents ?? 0).toLocaleString()} variant={4} />
+      <MetricCard color="#36ad7e" detail="Owned by you" icon="users" label="Owned Documents" onClick={() => onViewDetails?.('owned')} value={loading ? '…' : error ? '—' : Number(data.owned_documents ?? 0).toLocaleString()} variant={4} />
+      <MetricCard color="#8b5de5" detail="Shared with you by others" icon="share" label="Shared Documents" onClick={() => onViewDetails?.('shared')} value={loading ? '…' : error ? '—' : Number(data.shared_documents ?? 0).toLocaleString()} variant={4} />
+      <MetricCard color="#16a6a0" detail="Current-version metadata" icon="storage" label="Total Storage" onClick={() => onViewDetails?.('all')} value={loading ? '…' : error ? '—' : bytesLabel(data.storage_bytes ?? 0)} variant={4} />
+    </div>
+  }
   const metrics = organizationDocumentMetrics
   if (scope === 'owned') {
     return <div className="docs-metric-grid is-four"><MetricCard color="#22a879" detail="Organization total" icon="document" label="Owned Documents" value={metrics.owned.toLocaleString()} variant={1} /><MetricCard color="#43b98b" detail="Across the organization" icon="users" label="Unique Owners" value={metrics.uniqueOwners.toLocaleString()} variant={3} /><MetricCard color="#1fa287" detail="Across owned records" icon="storage" label="Total Size (Owned)" value={bytesLabel(metrics.ownedStorageBytes)} variant={0} /><RateMetricCard color="#25a875" detail="14 documents need attention" label="Active Owned Docs" percent={Math.round((metrics.activeOwned / metrics.owned) * 100)} value={metrics.activeOwned.toLocaleString()} /></div>
@@ -794,11 +857,426 @@ function readDocumentView() {
   return validDocumentViews.has(requested) ? requested : 'main'
 }
 
+function AdminDocumentUploadModal({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null)
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [category, setCategory] = useState('')
+  const [classification, setClassification] = useState('CONFIDENTIAL')
+  const [progress, setProgress] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!file) {
+      setError('Choose a document to upload.')
+      return
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setError('Documents must be 50 MB or smaller.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    const body = new FormData()
+    body.append('file', file)
+    body.append('title', title || file.name.replace(/\.[^.]+$/, ''))
+    body.append('description', description)
+    body.append('category', category)
+    body.append('classification', classification)
+    try {
+      const result = await apiUpload('/api/documents/upload', body, { onProgress: setProgress })
+      if (result.latest_uploaded_version_status === 'QUARANTINED') {
+        setError(result.scan_message || 'Upload blocked: the file failed the security scan.')
+        return
+      }
+      if (result.latest_uploaded_version_status === 'PENDING_SCAN' || result.latest_uploaded_version_status === 'FAILED') {
+        setError(result.scan_message || 'Security scanning is temporarily unavailable. Please try again later.')
+        return
+      }
+      onUploaded(result)
+    } catch (requestError) {
+      setError(requestError.message || 'The document upload failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="docs-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <section aria-labelledby="docs-upload-info-title" aria-modal="true" className="docs-upload-info-modal docs-live-upload-modal" role="dialog">
+      <span className="docs-upload-info-icon"><Icon name="upload" /></span>
+      <h2 id="docs-upload-info-title">Upload Document</h2>
+      <p>The file is validated by SureDocs and uploaded to private storage.</p>
+      <form className="docs-live-upload-form" onSubmit={submit}>
+        <label>Document file<input disabled={busy} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError('') }} required type="file" /></label>
+        <label>Display name<input maxLength={255} onChange={(event) => setTitle(event.target.value)} placeholder={file?.name.replace(/\.[^.]+$/, '') ?? 'Document name'} value={title} /></label>
+        <label>Category<input maxLength={80} onChange={(event) => setCategory(event.target.value)} value={category} /></label>
+        <label>Classification<select onChange={(event) => setClassification(event.target.value)} value={classification}><option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select></label>
+        <label className="is-full">Description<textarea maxLength={10000} onChange={(event) => setDescription(event.target.value)} rows={3} value={description} /></label>
+        {busy && <>
+          <progress aria-label="Upload progress" max="100" value={progress} />
+          <p className="docs-live-upload-scanning" style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>{progress === 100 ? 'Scanning for malware…' : `Uploading ${progress}%`}</p>
+        </>}
+        {error && <p className="docs-live-upload-error" role="alert">{error}</p>}
+        <div className="docs-live-upload-actions"><button className="docs-reset-button" disabled={busy} onClick={onClose} type="button">Cancel</button><button className="docs-export-button" disabled={busy || !file} type="submit">{busy ? (progress === 100 ? 'Scanning for malware…' : `Uploading ${progress}%`) : 'Upload Document'}</button></div>
+      </form>
+    </section>
+  </div>
+}
+
+function permissionLabel(permission) {
+  if (permission.permission_type) return permission.permission_type
+  if (permission.can_edit && permission.can_download) return 'Read + Download + Edit'
+  if (permission.can_edit) return 'Edit'
+  if (permission.can_download) return 'Read + Download'
+  if (permission.can_view) return 'Read'
+  return 'No access'
+}
+
+function auditActionLabel(action) {
+  return String(action || '').replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+function RegistryDocumentDetails({ document, onClose, onPreview, onPermissionUpdated }) {
+  const [downloadError, setDownloadError] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const [screen, setScreen] = useState('details')
+  const [details, setDetails] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [detailsError, setDetailsError] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
+  const [permissionSearch, setPermissionSearch] = useState('')
+  const [userQuery, setUserQuery] = useState('')
+  const [eligibleResult, setEligibleResult] = useState({ query: null, users: [], error: '' })
+  const [selectedUser, setSelectedUser] = useState(null)
+  const [permissionLevel, setPermissionLevel] = useState('Read')
+  const [expiresAt, setExpiresAt] = useState('')
+  const [grantBusy, setGrantBusy] = useState(false)
+  const [grantError, setGrantError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [revokeTarget, setRevokeTarget] = useState(null)
+  const [revokeReason, setRevokeReason] = useState('No longer required')
+  const [revokeBusy, setRevokeBusy] = useState(false)
+  const [revokeError, setRevokeError] = useState('')
+
+  const loadDetails = useCallback(async (signal, { quiet = false } = {}) => {
+    if (!quiet) setLoading(true)
+    else setRefreshing(true)
+    setDetailsError('')
+    try {
+      const result = await apiGet(`/api/admin/permissions/documents/${encodeURIComponent(document.id)}`, { signal })
+      setDetails(result)
+      return result
+    } catch (requestError) {
+      if (requestError.name !== 'AbortError') {
+        setDetailsError(requestError.message || 'Document details could not be loaded.')
+      }
+      return null
+    } finally {
+      if (!signal?.aborted) {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    }
+  }, [document.id])
+
+  useEffect(() => {
+    const previousOverflow = globalThis.document.body.style.overflow
+    globalThis.document.body.style.overflow = 'hidden'
+    return () => {
+      globalThis.document.body.style.overflow = previousOverflow
+    }
+  }, [document.id])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    apiGet(`/api/admin/permissions/documents/${encodeURIComponent(document.id)}`, { signal: controller.signal })
+      .then((result) => setDetails(result))
+      .catch((requestError) => {
+        if (requestError.name !== 'AbortError') {
+          setDetailsError(requestError.message || 'Document details could not be loaded.')
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
+  }, [document.id])
+
+  useEffect(() => {
+    if (screen !== 'permissions') return undefined
+    const controller = new AbortController()
+    const query = userQuery.trim()
+    apiGet(
+      `/api/admin/permissions/documents/${encodeURIComponent(document.id)}/eligible-users?search=${encodeURIComponent(query)}`,
+      { signal: controller.signal },
+    ).then((users) => {
+      setEligibleResult({ query, users, error: '' })
+    }).catch((requestError) => {
+      if (requestError.name !== 'AbortError') {
+        setEligibleResult({ query, users: [], error: requestError.message || 'Eligible users could not be loaded.' })
+      }
+    })
+    return () => controller.abort()
+  }, [document.id, screen, userQuery])
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === 'Escape' && !revokeTarget) onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose, revokeTarget])
+
+  async function download() {
+    setDownloading(true)
+    setDownloadError('')
+    try {
+      const response = await apiGetFile(`/api/documents/${encodeURIComponent(document.id)}/download`)
+      const url = URL.createObjectURL(response.blob)
+      const anchor = globalThis.document.createElement('a')
+      anchor.href = url
+      anchor.download = document.original_filename || document.title
+      anchor.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (requestError) {
+      setDownloadError(requestError.message || 'The file could not be downloaded.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const doc = details?.document
+  const permissions = details?.permissions ?? []
+  const activePermissionCount = permissions.filter((permission) => permission.status === 'Active').length
+  const nextPermissionExpiry = permissions
+    .filter((permission) => permission.status === 'Active' && permission.expires_at)
+    .map((permission) => Date.parse(permission.expires_at))
+    .filter(Number.isFinite)
+    .sort((first, second) => first - second)[0]
+  const eligibleLoading = screen === 'permissions' && eligibleResult.query !== userQuery.trim()
+  const eligibleError = eligibleResult.query === userQuery.trim() ? eligibleResult.error : ''
+  const eligibleUsers = eligibleResult.query === userQuery.trim() ? eligibleResult.users : []
+  const ownerId = doc?.owner?.id
+  const filteredPermissions = permissions.filter((permission) => {
+    const query = permissionSearch.trim().toLowerCase()
+    return !query || permission.user_name.toLowerCase().includes(query) || permission.user_email.toLowerCase().includes(query)
+  })
+  const activeUserIds = new Set(permissions.filter((permission) => permission.status === 'Active').map((permission) => permission.user_id))
+  const filteredEligibleUsers = eligibleUsers.filter((user) => !activeUserIds.has(user.id))
+  const permissionHistory = (details?.audit ?? []).filter((event) => event.action_type.startsWith('PERMISSION_'))
+
+  useEffect(() => {
+    if (!nextPermissionExpiry || screen !== 'permissions') return undefined
+    const timer = window.setTimeout(() => loadDetails(undefined, { quiet: true }), Math.max(0, nextPermissionExpiry - Date.now() + 50))
+    return () => window.clearTimeout(timer)
+  }, [loadDetails, nextPermissionExpiry, screen])
+
+  async function submitGrant(event) {
+    event.preventDefault()
+    setGrantError('')
+    setNotice('')
+    if (!selectedUser) {
+      setGrantError('Select an active user before granting access.')
+      return
+    }
+    let expiry = null
+    if (expiresAt) {
+      const parsed = new Date(expiresAt)
+      if (Number.isNaN(parsed.getTime()) || parsed <= new Date()) {
+        setGrantError('Expiration must be a valid future date and time.')
+        return
+      }
+      expiry = parsed.toISOString()
+    }
+
+    setGrantBusy(true)
+    try {
+      await apiPost(`/api/admin/permissions/documents/${encodeURIComponent(document.id)}/grants`, {
+        user_id: selectedUser.id,
+        permission_level: permissionLevel,
+        expires_at: expiry,
+      })
+      setNotice(`Access granted to ${selectedUser.full_name}.`)
+      setSelectedUser(null)
+      setUserQuery('')
+      setExpiresAt('')
+      await loadDetails(undefined, { quiet: true })
+      onPermissionUpdated?.()
+    } catch (requestError) {
+      setGrantError(requestError.message || 'Access could not be granted.')
+    } finally {
+      setGrantBusy(false)
+    }
+  }
+
+  async function confirmRevoke() {
+    if (!revokeTarget) return
+    setRevokeBusy(true)
+    setRevokeError('')
+    try {
+      await apiDelete(
+        `/api/admin/permissions/documents/${encodeURIComponent(document.id)}/grants/${encodeURIComponent(revokeTarget.id)}`,
+        { body: { reason: revokeReason } },
+      )
+      setNotice(`Access revoked for ${revokeTarget.user_name}.`)
+      setRevokeTarget(null)
+      await loadDetails(undefined, { quiet: true })
+      onPermissionUpdated?.()
+    } catch (requestError) {
+      setRevokeError(requestError.message || 'Access could not be revoked.')
+    } finally {
+      setRevokeBusy(false)
+    }
+  }
+
+  const title = doc?.title || document.title
+  const fileName = doc?.original_filename || document.original_filename || title
+  const ownerName = doc?.owner?.full_name || document.owner_name
+  const fileExtension = doc?.file_extension || fileName.split('.').pop()
+  const documentStatus = doc?.status || document.status
+  const auditEvents = details?.audit ?? []
+  const normalizedStatus = normalizeRegistryDocument({ ...document, status: documentStatus }).status
+
+  function dismissModal() {
+    if (screen !== 'details') {
+      setScreen('details')
+      setNotice('')
+      return
+    }
+    onClose()
+  }
+
+  return <div className="docs-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) dismissModal() }}>
+    <section aria-labelledby="docs-live-detail-title" aria-modal="true" className="docs-details-modal docs-live-detail-modal" role="dialog">
+      <header className="docs-modal-header">
+        {screen === 'permissions' ? <span className="docs-event-icon is-access"><Icon name="users" /></span> : <div className="docs-modal-file-icon"><FileTypeIcon fileType={fileExtension || 'FILE'} /></div>}
+        <div className="docs-modal-heading-copy">
+          <div className="docs-modal-title-line"><h2 id="docs-live-detail-title">{screen === 'permissions' ? 'Manage permissions' : screen === 'activity' ? 'Document audit trail' : title}</h2>{screen === 'details' && <StatusBadge status={normalizedStatus} />}</div>
+          <div className="docs-modal-meta">
+            {screen === 'permissions'
+              ? <span>Manage who can access this document and their permission levels.</span>
+              : screen === 'activity'
+                ? <><span>{title}</span><i /><span>{auditEvents.length} recorded events</span></>
+                : <><span>{fileExtension}</span><i /><span>{bytesLabel(doc?.size_bytes ?? document.size_bytes)}</span><i /><span className={`docs-category-pill cat-${categoryClass(doc?.category || document.category || 'Uncategorized')}`}>{doc?.category || document.category || 'Uncategorized'}</span><i /><span>Uploaded {formatDate(doc?.uploaded_at || document.created_at)}</span></>}
+          </div>
+        </div>
+        <button aria-label={screen === 'details' ? 'Close document details' : 'Return to document details'} className="docs-modal-close" onClick={dismissModal} type="button"><Icon name="close" /></button>
+      </header>
+
+      {loading && !details ? <div className="docs-empty-state"><span><Icon name="clock" /></span><h3>Loading document details…</h3></div> : detailsError && !details ? <div className="docs-empty-state" role="alert"><span><Icon name="info" /></span><h3>Document details could not be loaded</h3><p>{detailsError}</p><button onClick={() => loadDetails()} type="button">Retry</button></div> : screen === 'details' ? <div className="docs-modal-content docs-live-detail-body">
+        {detailsError && <p className="docs-form-feedback is-error" role="alert">{detailsError} <button className="docs-text-action" onClick={() => loadDetails()} type="button">Retry</button></p>}
+        <div className="docs-overview-layout">
+          <section className="docs-detail-card">
+            <div className="docs-detail-card-heading"><div><h3>Document Details</h3><p>Registry metadata for this document</p></div><Icon name="info" /></div>
+            <dl className="docs-detail-list">
+              <div><dt>Document ID</dt><dd>{doc?.id || document.id}</dd></div>
+              <div><dt>Owner</dt><dd>{ownerName || 'Unknown owner'}</dd></div>
+              <div><dt>Owner email</dt><dd>{doc?.owner?.email || document.owner_email || '—'}</dd></div>
+              <div><dt>Category</dt><dd>{doc?.category || 'Uncategorized'}</dd></div>
+              <div><dt>File type</dt><dd>{doc?.content_type || document.content_type || fileExtension}</dd></div>
+              <div><dt>File size</dt><dd>{bytesLabel(doc?.size_bytes ?? document.size_bytes)}</dd></div>
+              <div><dt>Uploaded</dt><dd>{formatDate(doc?.uploaded_at || document.created_at, true)}</dd></div>
+              <div><dt>Last modified</dt><dd>{formatDate(doc?.updated_at || document.updated_at, true)}</dd></div>
+              <div><dt>Status</dt><dd><StatusBadge status={normalizedStatus} /></dd></div>
+              <div><dt>File version</dt><dd>{document.current_version_status || 'No available version'}</dd></div>
+              <div className="is-description"><dt>Description</dt><dd>{doc?.description || 'No description recorded.'}</dd></div>
+            </dl>
+            <p className="docs-metadata-notice"><Icon name="info" />Metadata access does not grant access to file contents. Preview and download require an active document permission.</p>
+          </section>
+          <div className="docs-overview-side">
+            <section className="docs-detail-card docs-overview-access">
+              <div className="docs-detail-card-heading"><div><h3>Access Overview</h3><p>{activePermissionCount} active permission grants</p></div><button className="docs-text-action" disabled={loading || !details} onClick={() => { setScreen('permissions'); setNotice('') }} type="button">Manage permissions <Icon name="arrow" /></button></div>
+              <PermissionStatusSummary permissions={permissions.map((permission) => ({ status: permission.status }))} />
+              <div className="docs-mini-list-heading"><strong>Shared With</strong><span>{activePermissionCount} active</span></div>
+              <div className="docs-shared-user-list">{permissions.filter((permission) => permission.status === 'Active').slice(0, 4).map((permission) => {
+                const initials = permission.user_name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
+                const level = permission.can_edit ? 'Edit' : permission.can_download ? 'Download' : 'Read'
+                return <div className="docs-shared-user" key={permission.id}><span className="docs-avatar is-small">{initials}</span><span><b>{permission.user_name}</b><small>{permission.user_email} · Granted {formatDate(permission.granted_at)}</small></span><AccessBadge level={level} /></div>
+              })}{activePermissionCount === 0 && <p className="docs-inline-empty">There are no active grants for this document.</p>}</div>
+            </section>
+            <section className="docs-detail-card docs-recent-activity">
+              <div className="docs-detail-card-heading"><div><h3>Recent Activity</h3><p>Latest recorded events</p></div><button className="docs-text-action" onClick={() => setScreen('activity')} type="button">View full audit trail <Icon name="arrow" /></button></div>
+              {auditEvents.length ? <div className="docs-recent-event-list">{auditEvents.slice(0, 5).map((event) => {
+                const eventType = event.action_type.startsWith('PERMISSION_') ? 'permission' : event.action_type.includes('VIEW') || event.action_type.includes('DOWNLOAD') ? 'access' : 'modification'
+                return <div className="docs-recent-event" key={event.id}><span className={`docs-event-icon is-${eventType}`}><Icon name={eventType === 'permission' ? 'users' : eventType === 'access' ? 'eye' : 'document'} /></span><span><b>{auditActionLabel(event.action_type)}{event.target_name ? ` · ${event.target_name}` : ''}</b><small>{event.actor_name || 'System'} · {formatDate(event.occurred_at, true)}</small></span></div>
+              })}</div> : <p className="docs-inline-empty">No activity has been recorded for this document.</p>}
+            </section>
+          </div>
+        </div>
+        {downloadError && <p className="docs-form-feedback is-error" role="alert">{downloadError}</p>}
+        <div className="docs-live-upload-actions">
+          {document.can_view && document.current_version_status === 'AVAILABLE' && <button className="docs-reset-button" onClick={() => onPreview(document)} type="button"><Icon name="eye" />Preview</button>}
+          {document.can_download && document.current_version_status === 'AVAILABLE' && <button className="docs-export-button" disabled={downloading} onClick={download} type="button">{downloading ? 'Downloading…' : 'Download'}</button>}
+          <button className="docs-reset-button" onClick={onClose} type="button">Close</button>
+          <button className="docs-export-button" disabled={loading || !details} onClick={() => { setScreen('permissions'); setNotice('') }} type="button"><Icon name="users" />Manage permissions</button>
+        </div>
+      </div> : screen === 'activity' ? <div className="docs-modal-content">
+        <section className="docs-detail-card docs-audit-panel">
+          <div className="docs-detail-card-heading"><div><h3>Document Activity</h3><p>Recorded audit events for {title}</p></div><button className="docs-text-action" disabled={refreshing} onClick={() => loadDetails(undefined, { quiet: true })} type="button">{refreshing ? 'Refreshing…' : 'Refresh'} <Icon name="arrow" /></button></div>
+          <div className="docs-audit-table-wrap"><table className="docs-audit-table"><thead><tr><th>Timestamp</th><th>Event</th><th>User</th><th>IP address</th><th>Result</th><th>Details</th></tr></thead><tbody>{auditEvents.map((event) => <tr key={event.id}><td>{formatDate(event.occurred_at, true)}</td><td><span className={`docs-event-type is-${event.action_type.startsWith('PERMISSION_') ? 'permission' : event.action_type.includes('VIEW') || event.action_type.includes('DOWNLOAD') ? 'access' : 'modification'}`}>{event.action_type}</span><b>{auditActionLabel(event.action_type)}</b></td><td>{event.actor_name || 'System'}</td><td className="docs-mono">{event.ip_address || '—'}</td><td><span className={`docs-result-badge is-${event.result === 'SUCCESS' ? 'recorded' : 'denied'}`}>{event.result}</span></td><td>{JSON.stringify(event.details || {})}</td></tr>)}</tbody></table>{auditEvents.length === 0 && <div className="docs-table-empty">No audit events have been recorded for this document.</div>}</div>
+        </section>
+      </div> : <div className="docs-modal-content">
+        {detailsError && <p className="docs-form-feedback is-error" role="alert">{detailsError} <button className="docs-text-action" onClick={() => loadDetails(undefined, { quiet: true })} type="button">Retry</button></p>}
+        {notice && <p className="docs-form-feedback" role="status">{notice}</p>}
+        <section className="docs-detail-card">
+          <div className="docs-detail-card-heading"><div><h3>{title}</h3><p>{doc?.description || fileName}</p></div><StatusBadge status={normalizedStatus} /></div>
+          <div className="docs-modal-meta"><span>Document ID {doc?.id || document.id}</span><i /><span>{ownerName || 'Unknown owner'}</span><i /><span>{bytesLabel(doc?.size_bytes ?? document.size_bytes)}</span><i /><span>{doc?.category || 'Uncategorized'}</span></div>
+        </section>
+        <section className="docs-detail-card docs-permission-list-card">
+          <div className="docs-detail-card-heading"><div><h3>Current permissions</h3><p>{activePermissionCount} active grants for this document</p></div></div>
+          <div className="docs-permission-toolbar">
+            <label className="docs-searchbox"><Icon name="search" /><span className="sr-only">Search permissions</span><input aria-label="Search users by name or email" onChange={(event) => setPermissionSearch(event.target.value)} placeholder="Search users or email..." type="search" value={permissionSearch} /></label>
+            <button className="docs-export-button" onClick={() => globalThis.document.getElementById('docs-grant-access')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} type="button"><Icon name="plus" />Grant access</button>
+          </div>
+          <div className="docs-audit-table-wrap"><table className="docs-audit-table"><thead><tr><th>User</th><th>Permission level</th><th>Granted by</th><th>Granted at</th><th>Expires at</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+            {loading && !details ? <tr><td colSpan="7">Loading permissions…</td></tr> : filteredPermissions.length ? filteredPermissions.map((permission) => <tr key={permission.id}>
+              <td><span className="docs-shared-user"><span className="docs-avatar is-small">{permission.user_name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span><span><b>{permission.user_name}</b><small>{permission.user_email}</small></span></span></td>
+              <td><AccessBadge level={permission.can_edit ? 'Edit' : permission.can_download ? 'Download' : 'Read'} /></td>
+              <td>{permission.granted_by_name}</td><td>{formatDate(permission.granted_at, true)}</td><td>{formatDate(permission.expires_at)}</td>
+              <td><StatusBadge status={permission.status} /></td>
+              <td>{permission.status === 'Active' && permission.user_id !== ownerId ? <button className="docs-revoke-button" disabled={revokeBusy} onClick={() => { setRevokeTarget(permission); setRevokeReason('No longer required'); setRevokeError('') }} type="button">Revoke access</button> : <span className="docs-action-muted">—</span>}</td>
+            </tr>) : <tr><td colSpan="7" className="docs-table-empty">{permissionSearch ? 'No permissions match this search.' : 'No permission grants have been recorded.'}</td></tr>}
+          </tbody></table></div>
+        </section>
+        <section className="docs-detail-card docs-share-form-card" id="docs-grant-access">
+          <div className="docs-detail-card-heading"><div><h3>Grant new access</h3><p>Select an eligible user and the access they need.</p></div><span className="docs-share-form-icon"><Icon name="share" /></span></div>
+          <form onSubmit={submitGrant}>
+            <label className="docs-form-label">Select user<input autoComplete="off" onChange={(event) => { setUserQuery(event.target.value); setSelectedUser(null); setGrantError('') }} placeholder="Search by name or email" value={selectedUser ? `${selectedUser.full_name} · ${selectedUser.email}` : userQuery} />
+              {userQuery && !selectedUser && <span className="docs-user-suggestions" role="listbox">{eligibleLoading ? <span>Searching users…</span> : eligibleError ? <span>{eligibleError}</span> : filteredEligibleUsers.length ? filteredEligibleUsers.map((user) => <button key={user.id} onClick={() => { setSelectedUser(user); setUserQuery('') }} role="option" type="button"><span className="docs-avatar is-small">{user.full_name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span><span><b>{user.full_name}</b><small>{user.email}</small></span></button>) : <span>{userQuery ? 'No eligible users found.' : 'No eligible users available.'}</span>}</span>}
+            </label>
+            <label className="docs-form-label">Permission level<select onChange={(event) => setPermissionLevel(event.target.value)} value={permissionLevel}><option value="Read">View — view only</option><option value="Read + Download">View + Download</option><option value="Edit">Edit — view and edit</option></select></label>
+            <label className="docs-form-label">Expiration date <span className="docs-optional">(optional)</span><input onChange={(event) => setExpiresAt(event.target.value)} type="datetime-local" value={expiresAt} /></label>
+            <button className="docs-export-button" disabled={grantBusy || !selectedUser} type="submit">{grantBusy ? 'Granting…' : 'Grant access'}</button>
+            {grantError && <p className="docs-form-feedback is-error">{grantError}</p>}
+            {eligibleError && !userQuery && <p className="docs-form-feedback is-error">{eligibleError}</p>}
+          </form>
+        </section>
+        <section className="docs-detail-card docs-audit-panel">
+          <div className="docs-detail-card-heading"><div><h3>Permission history</h3><p>Grant and revocation events recorded for this document</p></div></div>
+          <div className="docs-audit-table-wrap"><table className="docs-audit-table"><thead><tr><th>User</th><th>Action</th><th>Permission</th><th>Changed by</th><th>Changed at</th><th>Status</th></tr></thead><tbody>{permissionHistory.length ? permissionHistory.map((event) => <tr key={event.id}><td>{event.target_name || event.target_email || 'Unknown user'}{event.target_email && <small>{event.target_email}</small>}</td><td>{auditActionLabel(event.action_type)}</td><td>{event.details?.permission_level || permissionLabel(event.details || {})}</td><td>{event.actor_name || 'System'}</td><td>{formatDate(event.occurred_at, true)}</td><td><StatusBadge status={event.action_type === 'PERMISSION_REVOKED' ? 'Revoked' : event.result === 'SUCCESS' ? 'Active' : event.result} /></td></tr>) : <tr><td className="docs-table-empty" colSpan="6">No permission history has been recorded.</td></tr>}</tbody></table></div>
+        </section>
+      </div>}
+
+      {revokeTarget && <div className="docs-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !revokeBusy) setRevokeTarget(null) }}>
+        <section aria-labelledby="docs-revoke-title" aria-modal="true" className="docs-upload-info-modal" role="alertdialog">
+          <span className="docs-upload-info-icon"><Icon name="revoke" /></span><h2 id="docs-revoke-title">Revoke access?</h2>
+          <p>Revoke access for <strong>{revokeTarget.user_name}</strong> to <strong>{title}</strong>? This change will be recorded in the document audit history.</p>
+          <label className="docs-form-label">Reason for revocation<input maxLength={500} onChange={(event) => { setRevokeReason(event.target.value); setRevokeError('') }} value={revokeReason} /></label>
+          {revokeError && <p className="docs-form-feedback is-error" role="alert">{revokeError}</p>}
+          <div className="docs-live-upload-actions"><button className="docs-reset-button" disabled={revokeBusy} onClick={() => setRevokeTarget(null)} type="button">Cancel</button><button className="docs-revoke-button" disabled={revokeBusy || !revokeReason.trim()} onClick={confirmRevoke} type="button">{revokeBusy ? 'Revoking…' : 'Confirm revoke'}</button></div>
+        </section>
+      </div>}
+    </section>
+  </div>
+}
+
 function csvValue(value) {
   return `"${String(value ?? '').replaceAll('"', '""')}"`
 }
 
-export default function AdminDocumentsWorkspace({ initialDocumentId, onOpenDocument, onCloseDocument }) {
+export function LegacyAdminDocumentsWorkspace({ initialDocumentId, onOpenDocument, onCloseDocument }) {
   const [view, setView] = useState(readDocumentView)
   const [dateRange, setDateRange] = useState('30')
   const [category, setCategory] = useState('all')
@@ -941,5 +1419,134 @@ export default function AdminDocumentsWorkspace({ initialDocumentId, onOpenDocum
     </>}
     {selectedDocument && selectedSettings && <DocumentDetailsModal activeTab={activeTab} document={selectedDocument} events={selectedEvents} onAddTag={addDocumentTag} onClose={onCloseDocument} onGrant={grantPermission} onRevoke={revokePermission} onRevokeAll={revokeAllPermissions} onSettingsChange={updateSharingSetting} onTabChange={changeDocumentTab} permissions={selectedPermissions} sharingSettings={selectedSettings} tags={selectedTags} />}
     {uploadInfoOpen && <div className="docs-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setUploadInfoOpen(false) }}><section aria-labelledby="docs-upload-info-title" aria-modal="true" className="docs-upload-info-modal" role="dialog"><span className="docs-upload-info-icon"><Icon name="upload" /></span><h2 id="docs-upload-info-title">Upload Document</h2><p>The admin Documents workspace is using seeded mock data for this preview. File upload and storage are not connected here.</p><div className="docs-upload-info-note"><Icon name="info" />This preview will not upload a file or change PostgreSQL or S3.</div><button className="docs-export-button" onClick={() => setUploadInfoOpen(false)} type="button">Close</button></section></div>}
+  </div>
+}
+
+export default function AdminDocumentsWorkspace({ initialDocumentId, onOpenDocument, onCloseDocument }) {
+  const [category, setCategory] = useState('all')
+  const [registryScope, setRegistryScope] = useState('all')
+  const [categories, setCategories] = useState([])
+  const [summary, setSummary] = useState(null)
+  const [overviewLoading, setOverviewLoading] = useState(true)
+  const [overviewError, setOverviewError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadNotice, setUploadNotice] = useState('')
+  const [detailState, setDetailState] = useState({ documentId: null, document: null, error: '' })
+  const [previewDocument, setPreviewDocument] = useState(null)
+  const selectedDocument = detailState.documentId === initialDocumentId ? detailState.document : null
+  const detailError = detailState.documentId === initialDocumentId ? detailState.error : ''
+
+  useEffect(() => {
+    const controller = new AbortController()
+    Promise.all([
+      apiGet('/api/documents/registry/summary', { signal: controller.signal }),
+      apiGet('/api/documents/registry/categories', { signal: controller.signal }),
+    ]).then(([nextSummary, nextCategories]) => {
+      setSummary(nextSummary)
+      setCategories(nextCategories.items)
+    }).catch((requestError) => {
+      if (requestError.name !== 'AbortError') {
+        setOverviewError(requestError.message || 'Document statistics could not be loaded.')
+        setSummary(null)
+        setCategories([])
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setOverviewLoading(false)
+    })
+    return () => controller.abort()
+  }, [refreshKey])
+
+  useEffect(() => {
+    if (!initialDocumentId) return undefined
+    const controller = new AbortController()
+    apiGet(`/api/documents/registry?document_id=${encodeURIComponent(initialDocumentId)}&page=1&page_size=1`, { signal: controller.signal })
+      .then((result) => {
+        if (!result.items.length) {
+          setDetailState({ documentId: initialDocumentId, document: null, error: 'This document is not available in the registry.' })
+          return
+        }
+        setDetailState({ documentId: initialDocumentId, document: result.items[0], error: '' })
+      })
+      .catch((requestError) => {
+        if (requestError.name !== 'AbortError') {
+          setDetailState({
+            documentId: initialDocumentId,
+            document: null,
+            error: requestError.message || 'Document metadata could not be loaded.',
+          })
+        }
+      })
+    return () => controller.abort()
+  }, [initialDocumentId])
+
+  function openDetails(document) {
+    setDetailState({ documentId: document.id, document, error: '' })
+    onOpenDocument(document.id)
+  }
+
+  function closeDetails() {
+    setDetailState({ documentId: null, document: null, error: '' })
+    setPreviewDocument(null)
+    onCloseDocument()
+  }
+
+  function refreshOverview() {
+    setOverviewLoading(true)
+    setOverviewError('')
+    setRefreshKey((value) => value + 1)
+  }
+
+  function handleUploaded(document) {
+    setUploadOpen(false)
+    setUploadNotice(
+      document.latest_uploaded_version_status === 'AVAILABLE'
+        ? 'Document uploaded and security scan passed.'
+        : `“${document.title}” was stored; its file scan is still ${document.latest_uploaded_version_status || 'processing'}.`,
+    )
+    setCategory('all')
+    refreshOverview()
+  }
+
+  function focusRegistry() {
+    globalThis.document.querySelector('.docs-registry-panel')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }
+
+  function showRegistryScope(nextScope) {
+    setRegistryScope(nextScope)
+    focusRegistry()
+  }
+
+  return <div className="admin-documents-workspace is-main">
+    <header className="docs-page-heading">
+      <div><h1>Documents</h1><p>Manage all documents in the organization. View, search, and monitor document activity.</p></div>
+      <button className="docs-upload-button" onClick={() => setUploadOpen(true)} type="button"><Icon name="upload" />Upload Document</button>
+    </header>
+    {uploadNotice && <div className="docs-live-upload-success" role="status">{uploadNotice}<button aria-label="Dismiss upload notice" onClick={() => setUploadNotice('')} type="button">×</button></div>}
+    <MetricCards error={Boolean(overviewError)} loading={overviewLoading} onViewDetails={showRegistryScope} scope="main" summary={summary} />
+    {overviewError && <div className="docs-live-overview-error" role="alert">{overviewError}<button onClick={refreshOverview} type="button">Retry</button></div>}
+    <div className="docs-main-layout">
+      <CategorySidebar categories={categories} onSelect={setCategory} selected={category} total={overviewLoading || overviewError ? null : summary?.total_documents ?? null} />
+      <div className="docs-main-registry">
+        <DocumentRegistry
+          categories={categories}
+          category={category}
+          onCategoryChange={setCategory}
+          onRegistryScopeChange={setRegistryScope}
+          onOpenDocument={openDetails}
+          registryScope={registryScope}
+          refreshKey={refreshKey}
+          scope="main"
+        />
+        <p className="docs-data-note"><Icon name="info" />Registry metadata and aggregates are read from PostgreSQL. File contents remain in private S3 and are available only through authorized document routes.</p>
+      </div>
+    </div>
+    {detailError && !selectedDocument && <div className="docs-live-overview-error" role="alert">{detailError}<button onClick={closeDetails} type="button">Close</button></div>}
+    {selectedDocument && <RegistryDocumentDetails document={selectedDocument} onClose={closeDetails} onPermissionUpdated={refreshOverview} onPreview={setPreviewDocument} />}
+    {previewDocument && <DocumentViewer document={previewDocument} onClose={() => setPreviewDocument(null)} />}
+    {uploadOpen && <AdminDocumentUploadModal onClose={() => setUploadOpen(false)} onUploaded={handleUploaded} />}
   </div>
 }

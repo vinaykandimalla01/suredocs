@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiGet, apiPatch, apiPost } from './api.js'
+import EmployeeActivitySection from './EmployeeActivitySection.jsx'
 import DocumentsWorkspace from './DocumentsWorkspace.jsx'
 import EmployeeAccessRequestsPage from './EmployeeAccessRequestsPage.jsx'
 import ProfileSettingsWorkspace from './ProfileSettingsWorkspace.jsx'
+import SharingPermissionsPage from './SharingPermissionsPage.jsx'
 import UserAvatar from './UserAvatar.jsx'
 import './EmployeeDashboard.css'
 
@@ -12,6 +14,7 @@ const employeeNavigation = [
   { label: 'Shared with Me', href: '/employee/shared', icon: 'users' },
   { label: 'Upload Document', href: '/employee/upload', icon: 'upload' },
   { label: 'Document Activity', href: '/employee/activity', icon: 'activity' },
+  { label: 'Sharing & Permissions', href: '/employee/sharing', icon: 'users' },
   { label: 'Access Requests', href: '/employee/requests', icon: 'inbox' },
 ]
 
@@ -376,13 +379,20 @@ function activityLabel(actionType) {
   const labels = {
     DOCUMENT_VIEWED: 'Document viewed',
     DOCUMENT_DOWNLOADED: 'Document downloaded',
-    ACCESS_GRANTED: 'Access granted',
-    PERMISSION_UPDATED: 'Permission changed',
+    DOCUMENT_METADATA_UPDATED: 'Metadata updated',
+    DOCUMENT_VERSION_CREATED: 'Document version created',
+    DOCUMENT_SCAN_COMPLETED: 'Security scan completed',
+    PERMISSION_GRANTED: 'Permission granted',
     PERMISSION_REVOKED: 'Permission revoked',
     ACCESS_DENIED: 'Access denied',
-    DOCUMENT_CREATED: 'Document uploaded',
-    DOCUMENT_UPDATED: 'Document updated',
+    DOCUMENT_UPLOADED: 'Document uploaded',
     DOCUMENT_DELETED: 'Document deleted',
+    DOCUMENT_RESTORED: 'Document restored',
+    UPLOAD_REJECTED: 'Upload rejected',
+    ACCESS_REQUEST_SUBMITTED: 'Access request submitted',
+    ACCESS_REQUEST_APPROVED: 'Access request approved',
+    ACCESS_REQUEST_DENIED: 'Access request denied',
+    ACCESS_REQUEST_CANCELLED: 'Access request cancelled',
   }
   return labels[actionType] || actionType.replaceAll('_', ' ').toLowerCase().replace(/^./, (letter) => letter.toUpperCase())
 }
@@ -390,16 +400,16 @@ function activityLabel(actionType) {
 function activityIcon(actionType) {
   if (actionType.includes('DENIED') || actionType.includes('REVOKED')) return 'denied'
   if (actionType.includes('DOWNLOAD')) return 'download'
-  if (actionType.includes('ACCESS_GRANTED')) return 'share'
+  if (actionType.includes('PERMISSION_GRANTED')) return 'share'
   if (actionType.includes('PERMISSION')) return 'edit'
   if (actionType.includes('VIEWED')) return 'eye'
-  if (actionType.includes('CREATED')) return 'upload'
+  if (actionType.includes('UPLOAD') || actionType.includes('CREATED')) return 'upload'
   return 'file'
 }
 
 function activityTone(actionType) {
   if (actionType.includes('DENIED') || actionType.includes('REVOKED')) return 'is-error'
-  if (actionType.includes('ACCESS_GRANTED')) return 'is-success'
+  if (actionType.includes('PERMISSION_GRANTED')) return 'is-success'
   if (actionType.includes('PERMISSION')) return 'is-warning'
   return 'is-info'
 }
@@ -422,32 +432,6 @@ async function getDistinctSharedDocumentCount(documents, signal) {
   await Promise.all(Array.from({ length: Math.min(6, documents.length) }, worker))
   if (results.some((result) => result === null)) return null
   return results.filter((result) => result.items.some((permission) => permission.is_effective)).length
-}
-
-async function fetchOwnedAuditEvents(documents, signal) {
-  const scopedDocuments = documents.slice(0, 40)
-  const results = new Array(scopedDocuments.length)
-  let nextIndex = 0
-  async function worker() {
-    while (nextIndex < scopedDocuments.length) {
-      const index = nextIndex++
-      try {
-        const response = await apiGet(`/api/documents/${scopedDocuments[index].id}/audit`, { signal })
-        results[index] = response.items.map((event) => ({ ...event, document: scopedDocuments[index] }))
-      } catch (error) {
-        if (error.name === 'AbortError') throw error
-        results[index] = null
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(6, scopedDocuments.length) }, worker))
-  const events = results.flatMap((result) => result || [])
-  events.sort((left, right) => new Date(right.occurred_at) - new Date(left.occurred_at))
-  return {
-    events,
-    partial: documents.length > scopedDocuments.length || results.some((result) => result === null),
-    failed: results.filter((result) => result === null).length,
-  }
 }
 
 function EmployeeDashboardContent({ user, notificationProps, notificationsOpen, setNotificationsOpen, pendingRequestCounts }) {
@@ -480,7 +464,7 @@ function EmployeeDashboardContent({ user, notificationProps, notificationsOpen, 
     { href: '/employee/upload', icon: 'upload', title: 'Upload Document', detail: 'Add a new document', primary: true },
     { href: '/employee/documents', icon: 'folder', title: 'My Documents', detail: 'View and manage your files' },
     { href: '/employee/shared', icon: 'users', title: 'Shared with Me', detail: 'Access documents shared with you' },
-    { href: '/employee/documents', icon: 'share', title: 'Sharing & Permissions', detail: 'Manage access to your documents' },
+    { href: '/employee/sharing', icon: 'share', title: 'Sharing & Permissions', detail: 'Manage access to your documents' },
   ]
 
   useEffect(() => {
@@ -1176,119 +1160,21 @@ function UploadDocumentPage({ user }) {
   )
 }
 
-function EmployeeActivityPage({ user, notificationProps, notificationsOpen, setNotificationsOpen }) {
-  const [search, setSearch] = useState('')
-  const [actionFilter, setActionFilter] = useState('all')
-  const [outcomeFilter, setOutcomeFilter] = useState('all')
-  const [events, setEvents] = useState([])
-  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('eventId') || '')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [page, setPage] = useState(1)
-  const pageSize = 20
-
-  useEffect(() => {
-    const controller = new AbortController()
-    async function loadActivity() {
-      try {
-        const documents = await apiGet('/api/documents/my', { signal: controller.signal })
-        const audit = await fetchOwnedAuditEvents(documents.items, controller.signal)
-        setEvents(audit.events)
-        if (audit.failed > 0 && audit.failed === documents.items.length) {
-          setError('Audit records could not be loaded for your documents.')
-        } else if (audit.partial) {
-          setError('Some older document activity could not be retrieved. Only audit records the current account is authorized to view are included.')
-        }
-      } catch (requestError) {
-        if (requestError.name !== 'AbortError') setError(requestError.message)
-      } finally {
-        if (!controller.signal.aborted) setLoading(false)
-      }
-    }
-    loadActivity()
-    return () => controller.abort()
-  }, [])
-
-  const selected = events.find((event) => event.id === selectedId) || null
-  const filtered = events.filter((event) => (
-    (!search || `${event.document.title} ${event.actor_name ?? ''} ${activityLabel(event.action_type)}`.toLowerCase().includes(search.toLowerCase())) &&
-    (actionFilter === 'all' || event.action_type === actionFilter) &&
-    (outcomeFilter === 'all' || event.result === outcomeFilter)
-  ))
-  const visible = filtered.slice((page - 1) * pageSize, page * pageSize)
-
-  function updateFilter(setFilter, value) {
-    setFilter(value)
-    setPage(1)
-  }
-
-  function exportActivity() {
-    const rows = [['Timestamp', 'Action', 'Document', 'Actor', 'Outcome'], ...filtered.map((event) => [event.occurred_at, activityLabel(event.action_type), event.document.title, event.actor_name ?? 'Unavailable', event.result])]
-    const csv = rows.map((row) => row.map((item) => `"${String(item).replaceAll('"', '""')}"`).join(',')).join('\r\n')
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'suredocs-document-activity.csv'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }
-
+function EmployeeActivityPage(props) {
   return (
-    <>
-    <EmployeeTopBar {...notificationProps} notificationsOpen={notificationsOpen} onSearchChange={(event) => { setSearch(event.target.value); setPage(1) }} search={search} setNotificationsOpen={setNotificationsOpen} user={user} />
-    <main className="mx-auto max-w-[1600px] space-y-3 px-4 py-4 sm:px-5">
-      <EmployeePageHeader action={<button className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-[10px] font-semibold text-indigo-700" disabled={!filtered.length} onClick={exportActivity} type="button"><EmployeeIcon className="h-3 w-3" name="download" />Export Activity</button>} description="Audit records for documents you own. Records are limited to events your account is authorized to review." icon="activity" title="Document Activity" />
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-        <EmployeeSearch label="Search document activity" onChange={(value) => { setSearch(value); setPage(1) }} placeholder="Search document, actor, action..." value={search} />
-        <EmployeeFilter label="Activity action" onChange={(value) => updateFilter(setActionFilter, value)} options={[{ value: 'all', label: 'All Actions' }, ...[...new Set(events.map((event) => event.action_type))].map((value) => ({ value, label: activityLabel(value) }))]} value={actionFilter} />
-        <EmployeeFilter label="Activity outcome" onChange={(value) => updateFilter(setOutcomeFilter, value)} options={[{ value: 'all', label: 'All Outcomes' }, ...[...new Set(events.map((event) => event.result))].map((value) => ({ value, label: value }))]} value={outcomeFilter} />
-      </div>
-      {error && <p className="rounded-md bg-amber-50 px-3 py-2 text-[10px] text-amber-900" role="status">{error}</p>}
-      <div className="grid grid-cols-1 items-start gap-2 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[650px] text-left">
-              <thead className="bg-slate-50 text-[10px] font-semibold text-slate-500"><tr><th className="px-2 py-2">Timestamp</th><th className="px-2 py-2">Action</th><th className="px-2 py-2">Document</th><th className="px-2 py-2">Actor</th><th className="px-2 py-2">Outcome</th><th className="px-2 py-2">Details</th></tr></thead>
-              <tbody>
-                {visible.map((event) => <tr aria-selected={selectedId === event.id} className={`cursor-pointer border-t border-slate-100 hover:bg-indigo-50/50 ${selectedId === event.id ? 'bg-indigo-50/50' : ''}`} key={event.id} onClick={() => setSelectedId(event.id)}>
-                  <td className="whitespace-nowrap px-2 py-2 text-[10px] text-slate-600">{new Date(event.occurred_at).toLocaleString()}</td>
-                  <td className="px-2 py-2"><span className="flex min-w-[130px] items-center gap-1.5"><span className={`flex h-6 w-6 items-center justify-center rounded-full ${activityTone(event.action_type)} bg-opacity-20`}><EmployeeIcon className="h-3.5 w-3.5" name={activityIcon(event.action_type)} /></span><span className="text-[10px] font-semibold text-slate-700">{activityLabel(event.action_type)}</span></span></td>
-                  <td className="px-2 py-2 text-[10px] text-slate-700">{event.document.title}</td>
-                  <td className="px-2 py-2 text-[10px] text-slate-700">{event.actor_name || 'Unavailable'}</td>
-                  <td className="px-2 py-2"><EmployeeBadge tone={event.result === 'SUCCESS' ? 'green' : 'red'}>{event.result}</EmployeeBadge></td>
-                  <td className="px-2 py-2"><button aria-label={`View activity details: ${activityLabel(event.action_type)}`} className="rounded p-1 text-slate-500 hover:bg-slate-100" onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedId(event.id) }} type="button"><EmployeeIcon className="h-3.5 w-3.5" name="more" /></button></td>
-                </tr>)}
-                {!loading && filtered.length === 0 && <tr><td className="py-8 text-center text-[10px] text-slate-500" colSpan={6}>{events.length ? 'No activity matches these filters.' : error ? 'Activity data is unavailable.' : 'No audit events have been recorded for your documents.'}</td></tr>}
-                {loading && <tr><td className="py-8 text-center text-[10px] text-slate-500" colSpan={6}>Loading authorized activity…</td></tr>}
-              </tbody>
-            </table>
-          </div>
-          <EmployeePagination count={filtered.length} label="activities" onPageChange={setPage} page={page} pageSize={pageSize} />
-        </section>
-        {selected && <aside aria-label="Activity details" className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <header className="flex items-center justify-between border-b border-slate-100 p-3"><h2 className="text-[12px] font-semibold text-slate-800">Activity Details</h2><button aria-label="Close activity details" className="text-slate-400" onClick={() => setSelectedId('')} type="button"><EmployeeIcon className="h-4 w-4" name="close" /></button></header>
-          <div className="p-3">
-            <div className="flex items-center gap-2"><span className={`flex h-8 w-8 items-center justify-center rounded-full ${activityTone(selected.action_type)} bg-opacity-20`}><EmployeeIcon className="h-4 w-4" name={activityIcon(selected.action_type)} /></span><span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold text-slate-800">{activityLabel(selected.action_type)}</span><span className="block text-[10px] text-slate-500">{new Date(selected.occurred_at).toLocaleString()}</span></span><EmployeeBadge tone={selected.result === 'SUCCESS' ? 'green' : 'red'}>{selected.result}</EmployeeBadge></div>
-            <dl className="mt-4 space-y-3 text-[10px]">{[
-              ['Event ID', selected.id],
-              ['Action', activityLabel(selected.action_type)],
-              ['Outcome', selected.result],
-              ['Timestamp', new Date(selected.occurred_at).toLocaleString()],
-              ['Document', selected.document.title],
-              ['Actor', selected.actor_name || 'Unavailable'],
-              ['IP address', selected.ip_address || 'Unavailable'],
-              ['Request ID', selected.request_id || 'Unavailable'],
-            ].map(([label, value]) => <div className="grid grid-cols-[74px_1fr] gap-2" key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words text-slate-700">{value}</dd></div>)}</dl>
-          </div>
-        </aside>}
-      </div>
-    </main>
-    </>
+    <EmployeeActivitySection
+      {...props}
+      EmployeeTopBar={EmployeeTopBar}
+      EmployeeIcon={EmployeeIcon}
+      EmployeeSearch={EmployeeSearch}
+      EmployeeFilter={EmployeeFilter}
+      EmployeeBadge={EmployeeBadge}
+      activityLabel={activityLabel}
+      activityIcon={activityIcon}
+      activityTone={activityTone}
+    />
   )
 }
-
 function EmployeeRequestsPage({ user, notificationsOpen, onSearchChange, search, setNotificationsOpen, notificationProps }) {
   return (
     <>
@@ -1464,6 +1350,7 @@ export default function EmployeeDashboard({ user }) {
   const initialDocumentId = new URLSearchParams(window.location.search).get('documentId')
   const isDashboard = currentPath === '/employee' || currentPath === '/employee/dashboard'
   const isDocumentsRoute = ['/employee/documents', '/employee/shared', '/employee/upload'].includes(currentPath)
+  const isSharingRoute = currentPath === '/employee/sharing'
   const isAccessRequestsRoute = currentPath === '/employee/requests'
 
   let profileSection = null
@@ -1487,6 +1374,7 @@ export default function EmployeeDashboard({ user }) {
   ) : {
     '/employee/documents': <DocumentsWorkspace initialDocumentId={initialDocumentId} mode="owned" onSearchChange={setWorkspaceSearch} search={workspaceSearch} user={user} />,
     '/employee/shared': <DocumentsWorkspace initialDocumentId={initialDocumentId} mode="shared" onSearchChange={setWorkspaceSearch} search={workspaceSearch} user={user} />,
+    '/employee/sharing': <SharingPermissionsPage />,
     '/employee/upload': <DocumentsWorkspace mode="owned" startInUpload user={user} />,
     '/employee/activity': <EmployeeActivityPage notificationProps={notificationProps} notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} user={user} />,
     '/employee/requests': <EmployeeRequestsPage
@@ -1534,7 +1422,7 @@ export default function EmployeeDashboard({ user }) {
       <div className="employee-shell-content">
         {isDashboard
           ? <EmployeeDashboardContent notificationProps={notificationProps} notificationsOpen={notificationsOpen} pendingRequestCounts={pendingRequestCounts} setNotificationsOpen={setNotificationsOpen} user={user} />
-          : (isDocumentsRoute || isProfileRoute)
+          : (isDocumentsRoute || isProfileRoute || isSharingRoute)
             ? <>
               <EmployeeTopBar
                 {...notificationProps}

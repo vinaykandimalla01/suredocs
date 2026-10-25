@@ -223,3 +223,43 @@ class UserMfaMethod(Base):
         CheckConstraint("NOT is_enabled OR confirmed_at IS NOT NULL", name="ck_user_mfa_methods_enabled_confirmed"),
         Index("ix_user_mfa_methods_user_enabled", "user_id", "is_enabled"),
     )
+
+
+class DocumentAuditSecurityFlag(Base):
+    """Persistent owner-submitted reports associated with immutable audit events."""
+
+    __tablename__ = "document_audit_security_flags"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
+    )
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_audit_logs.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    document_id_snapshot: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    reported_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+    )
+    submission_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("submission_id", name="uq_document_audit_security_flags_submission"),
+        CheckConstraint(
+            "reason_code IN ('SUSPICIOUS_ACCESS', 'UNEXPECTED_DOWNLOAD', "
+            "'UNAUTHORIZED_ATTEMPT', 'PERMISSION_CHANGE', 'UNRECOGNIZED_ACTOR', 'OTHER')",
+            name="ck_document_audit_security_flags_reason",
+        ),
+        CheckConstraint(
+            "description IS NULL OR length(description) <= 2000",
+            name="ck_document_audit_security_flags_description_length",
+        ),
+        Index("ix_document_audit_security_flags_event", "event_id", submitted_at.desc()),
+    )

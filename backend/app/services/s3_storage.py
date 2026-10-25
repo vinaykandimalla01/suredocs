@@ -17,6 +17,10 @@ class StorageUnavailableError(RuntimeError):
     """S3 is not configured or cannot be reached using the AWS credential chain."""
 
 
+class StorageObjectNotFoundError(StorageUnavailableError):
+    """The authorized document version has no matching private S3 object."""
+
+
 def get_s3_client():
     """Build an S3 client using the standard AWS credential provider chain."""
     return boto3.client("s3", region_name=AWS_REGION)
@@ -92,6 +96,17 @@ def get_document(key: str, version_id: str | None = None):
         arguments["VersionId"] = version_id
     try:
         return get_s3_client().get_object(**arguments)
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code in {"NoSuchKey", "NoSuchVersion", "404", "NotFound"}:
+            logger.error("S3 document object is missing (%s)", error_code)
+            raise StorageObjectNotFoundError(
+                "The document file could not be found in private storage."
+            ) from exc
+        logger.error("S3 document retrieval failed (%s)", type(exc).__name__)
+        raise StorageUnavailableError(
+            "The document file is temporarily unavailable."
+        ) from exc
     except (BotoCoreError, ClientError, NoCredentialsError) as exc:
         logger.error("S3 document retrieval failed (%s)", type(exc).__name__)
         raise StorageUnavailableError(
@@ -110,4 +125,51 @@ def delete_document_object(key: str, version_id: str | None = None) -> None:
         logger.error("S3 upload compensation failed (%s)", type(exc).__name__)
         raise StorageUnavailableError(
             "The uploaded object could not be removed after a database failure."
+        ) from exc
+
+
+def copy_document_object(
+    source_key: str,
+    destination_key: str,
+    *,
+    content_type: str,
+    checksum_sha256: str,
+    source_version_id: str | None = None,
+) -> str | None:
+    """Promote an object from quarantine to trusted storage and verify it before returning."""
+    try:
+        client = get_s3_client()
+        copy_source: dict[str, str] = {"Bucket": S3_BUCKET, "Key": source_key}
+        if source_version_id:
+            copy_source["VersionId"] = source_version_id
+        result = client.copy_object(
+            Bucket=S3_BUCKET,
+            Key=destination_key,
+            CopySource=copy_source,
+            ContentType=content_type,
+            Metadata={"sha256": checksum_sha256},
+            MetadataDirective="REPLACE",
+            ChecksumAlgorithm="SHA256",
+            ServerSideEncryption="AES256",
+        )
+        version_id = result.get("VersionId")
+        head_arguments = {"Bucket": S3_BUCKET, "Key": destination_key, "ChecksumMode": "ENABLED"}
+        if version_id:
+            head_arguments["VersionId"] = version_id
+        try:
+            stored = client.head_object(**head_arguments)
+            if stored.get("Metadata", {}).get("sha256") != checksum_sha256:
+                raise StorageUnavailableError("Promoted document object checksum metadata verification failed.")
+        except StorageUnavailableError:
+            raise
+        except (BotoCoreError, ClientError, NoCredentialsError) as exc:
+            logger.error("Promoted S3 document verification failed (%s)", type(exc).__name__)
+            raise StorageUnavailableError(
+                "Document promotion verification failed."
+            ) from exc
+        return version_id
+    except (BotoCoreError, ClientError, NoCredentialsError) as exc:
+        logger.error("S3 document copy failed (%s)", type(exc).__name__)
+        raise StorageUnavailableError(
+            "Document promotion from quarantine failed. The upload was not completed."
         ) from exc

@@ -85,3 +85,9 @@ class AccessRequestPageResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class AccessRequestSummaryResponse(BaseModel):
+    pending_requests: int
+    users_with_access: int
+    denied_requests: int

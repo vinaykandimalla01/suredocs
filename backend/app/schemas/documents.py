@@ -97,6 +97,8 @@ class DocumentPermissionResponse(BaseModel):
     revoked_at: datetime | None
     revoked_by_user_id: uuid.UUID | None
     is_effective: bool
+    updated_at: datetime | None = None
+    status: str | None = None
 
 
 class DocumentResponse(BaseModel):
@@ -121,8 +123,11 @@ class DocumentResponse(BaseModel):
     custom_metadata: dict
     current_version_id: uuid.UUID | None
     current_version_number: int | None
+    current_version_status: str | None = None
     latest_uploaded_version_number: int | None = None
     latest_uploaded_version_status: str | None = None
+    scan_message: str | None = None
+    detection_name: str | None = None
     content_type: str | None
     size_bytes: int | None
     checksum_sha256: str | None
@@ -139,6 +144,25 @@ class DocumentResponse(BaseModel):
 class DocumentListResponse(BaseModel):
     items: list[DocumentResponse]
     total: int
+    page: int | None = None
+    page_size: int | None = None
+
+
+class DocumentRegistrySummaryResponse(BaseModel):
+    total_documents: int
+    owned_documents: int
+    shared_documents: int
+    storage_bytes: int
+
+
+class DocumentCategoryCount(BaseModel):
+    name: str
+    count: int
+
+
+class DocumentCategoryListResponse(BaseModel):
+    total: int
+    items: list[DocumentCategoryCount]
 
 
 class DocumentSummaryResponse(BaseModel):

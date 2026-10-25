@@ -25,6 +25,31 @@ router = APIRouter(
 )
 DocumentOwner = User.__table__.alias("document_owner")
 TargetUser = User.__table__.alias("target_user")
+DocumentActor = User.__table__.alias("document_actor")
+AuthActor = User.__table__.alias("auth_actor")
+AuthTarget = User.__table__.alias("auth_target")
+
+_SENSITIVE_DETAIL_KEYS = (
+    "password", "token", "secret", "credential", "authorization", "cookie",
+    "session", "presigned", "storage_key", "s3_key", "bucket", "object_key",
+)
+
+
+def _safe_details(value: Any) -> Any:
+    """Redact credentials and storage locators from administrator-visible details."""
+    if isinstance(value, dict):
+        return {
+            str(key): _safe_details(item)
+            for key, item in value.items()
+            if not any(part in str(key).lower().replace("-", "_") for part in _SENSITIVE_DETAIL_KEYS)
+        }
+    if isinstance(value, list):
+        return [_safe_details(item) for item in value[:100]]
+    if isinstance(value, str):
+        return value[:2000]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:2000]
 
 
 def _event_rows():
@@ -57,13 +82,13 @@ def _event_rows():
             document_action.label("action"),
             document_category.label("category"),
             DocumentAuditLog.result.label("result"),
-            cast(DocumentAuditLog.actor_user_id, String).label("actor_id"),
-            User.full_name.label("actor_name"),
-            User.email.label("actor_email"),
-            cast(User.role, String).label("actor_role"),
-            cast(DocumentAuditLog.target_user_id, String).label("target_user_id"),
-            TargetUser.c.full_name.label("target_user_name"),
-            TargetUser.c.email.label("target_user_email"),
+            cast(func.coalesce(DocumentAuditLog.actor_user_id_snapshot, DocumentAuditLog.actor_user_id), String).label("actor_id"),
+            func.coalesce(DocumentAuditLog.actor_name_snapshot, DocumentActor.c.full_name).label("actor_name"),
+            func.coalesce(DocumentAuditLog.actor_email_snapshot, DocumentActor.c.email).label("actor_email"),
+            func.coalesce(DocumentAuditLog.actor_role_snapshot, cast(DocumentActor.c.role, String)).label("actor_role"),
+            cast(func.coalesce(DocumentAuditLog.target_user_id_snapshot, DocumentAuditLog.target_user_id), String).label("target_user_id"),
+            func.coalesce(DocumentAuditLog.target_name_snapshot, TargetUser.c.full_name).label("target_user_name"),
+            func.coalesce(DocumentAuditLog.target_email_snapshot, TargetUser.c.email).label("target_user_email"),
             cast(DocumentAuditLog.document_id_snapshot, String).label("document_id"),
             func.coalesce(DocumentVersion.original_filename, Document.title).label("document_name"),
             func.coalesce(DocumentVersion.file_extension, literal("")).label("file_type"),
@@ -78,7 +103,10 @@ def _event_rows():
             DocumentAuditLog.details.label("details"),
         )
         .select_from(DocumentAuditLog)
-        .outerjoin(User, User.id == DocumentAuditLog.actor_user_id)
+        .outerjoin(
+            DocumentActor,
+            DocumentActor.c.id == func.coalesce(DocumentAuditLog.actor_user_id_snapshot, DocumentAuditLog.actor_user_id),
+        )
         .outerjoin(Document, Document.id == DocumentAuditLog.document_id_snapshot)
         .outerjoin(
             DocumentVersion,
@@ -88,7 +116,10 @@ def _event_rows():
             ),
         )
         .outerjoin(DocumentOwner, DocumentOwner.c.id == Document.owner_user_id)
-        .outerjoin(TargetUser, TargetUser.c.id == DocumentAuditLog.target_user_id)
+        .outerjoin(
+            TargetUser,
+            TargetUser.c.id == func.coalesce(DocumentAuditLog.target_user_id_snapshot, DocumentAuditLog.target_user_id),
+        )
     )
 
     auth_action = case(
@@ -98,12 +129,22 @@ def _event_rows():
         (AuthEvent.event_type == AuthEventType.ACCOUNT_LOCKED, "Account locked"),
         (AuthEvent.event_type == AuthEventType.SESSION_REVOKED, "Session revoked"),
         (AuthEvent.event_type == AuthEventType.AUTH_REJECTED_INACTIVE, "Login blocked"),
+        (AuthEvent.event_type == AuthEventType.USER_ROLE_CHANGED, "User role changed"),
+        (AuthEvent.event_type == AuthEventType.USER_STATUS_CHANGED, "User status changed"),
         else_=cast(AuthEvent.event_type, String),
     )
     auth_result = case(
-        (AuthEvent.event_type == AuthEventType.LOGIN_SUCCESS, "SUCCESS"),
         (AuthEvent.event_type == AuthEventType.AUTH_REJECTED_INACTIVE, "DENIED"),
-        else_="FAILED",
+        (AuthEvent.event_type.in_((AuthEventType.LOGIN_FAILED, AuthEventType.ACCOUNT_LOCKED, AuthEventType.MFA_REJECTED)), "FAILED"),
+        else_="SUCCESS",
+    )
+    auth_actor_id = func.coalesce(
+        AuthEvent.details["actor_user_id"].as_string(),
+        cast(AuthEvent.user_id, String),
+    )
+    auth_target_id = case(
+        (AuthEvent.event_type.in_((AuthEventType.USER_ROLE_CHANGED, AuthEventType.USER_STATUS_CHANGED)), cast(AuthEvent.user_id, String)),
+        else_=literal(None, type_=String),
     )
     auth_category = case(
         (AuthEvent.event_type.in_((AuthEventType.ACCOUNT_LOCKED, AuthEventType.SESSION_REVOKED)), "Security"),
@@ -118,13 +159,13 @@ def _event_rows():
             auth_action.label("action"),
             auth_category.label("category"),
             auth_result.label("result"),
-            cast(AuthEvent.user_id, String).label("actor_id"),
-            User.full_name.label("actor_name"),
-            User.email.label("actor_email"),
-            cast(User.role, String).label("actor_role"),
-            literal(None, type_=String).label("target_user_id"),
-            literal(None, type_=String).label("target_user_name"),
-            literal(None, type_=String).label("target_user_email"),
+            auth_actor_id.label("actor_id"),
+            AuthActor.c.full_name.label("actor_name"),
+            AuthActor.c.email.label("actor_email"),
+            cast(AuthActor.c.role, String).label("actor_role"),
+            auth_target_id.label("target_user_id"),
+            AuthTarget.c.full_name.label("target_user_name"),
+            AuthTarget.c.email.label("target_user_email"),
             literal(None, type_=String).label("document_id"),
             literal(None, type_=String).label("document_name"),
             literal(None, type_=String).label("file_type"),
@@ -139,14 +180,15 @@ def _event_rows():
             AuthEvent.details.label("details"),
         )
         .select_from(AuthEvent)
-        .outerjoin(User, User.id == AuthEvent.user_id)
+        .outerjoin(AuthActor, cast(AuthActor.c.id, String) == auth_actor_id)
+        .outerjoin(AuthTarget, cast(AuthTarget.c.id, String) == cast(AuthEvent.user_id, String))
     )
     return union_all(document_event, auth_event).subquery("audit_events")
 
 
 def _as_dict(row: Any) -> dict[str, Any]:
     value = dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
-    details = value.get("details") or {}
+    details = _safe_details(value.get("details") or {})
     reason = details.get("reason") if isinstance(details, dict) else None
     operation = details.get("operation") if isinstance(details, dict) else None
     if reason:

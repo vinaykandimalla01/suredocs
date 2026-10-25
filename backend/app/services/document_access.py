@@ -153,6 +153,8 @@ def record_audit(
     resolved_id = document.id if document is not None else document_id
     if resolved_id is None:
         raise ValueError("A document or document ID is required for audit records.")
+    actor = db.get(User, actor_user_id) if actor_user_id is not None else None
+    target = db.get(User, target_user_id) if target_user_id is not None else None
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent", "")[:512] or None
     request_id = request.headers.get("x-request-id", "")[:100] or None
@@ -164,7 +166,17 @@ def record_audit(
         ),
         document_id_snapshot=resolved_id,
         actor_user_id=actor_user_id,
+        actor_user_id_snapshot=actor.id if actor else actor_user_id,
+        actor_name_snapshot=actor.full_name if actor else None,
+        actor_email_snapshot=actor.email if actor else None,
+        actor_role_snapshot=(
+            actor.role.value if actor and hasattr(actor.role, "value")
+            else str(actor.role) if actor else None
+        ),
         target_user_id=target_user_id,
+        target_user_id_snapshot=target.id if target else target_user_id,
+        target_name_snapshot=target.full_name if target else None,
+        target_email_snapshot=target.email if target else None,
         action_type=action_type,
         result=result,
         ip_address=client_ip,

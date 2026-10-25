@@ -11,6 +11,7 @@ import tomllib
 import uuid
 import zipfile
 import xml.etree.ElementTree as ElementTree
+from datetime import timedelta
 from email import policy as email_policy
 from email.parser import BytesParser
 from io import BytesIO
@@ -30,7 +31,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import cast, exists, func, select, String
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, joinedload
 from starlette.concurrency import run_in_threadpool
@@ -42,17 +43,21 @@ from app.models.documents import (
     Document,
     DocumentAuditLog,
     DocumentPermission,
+    DocumentScan,
     DocumentVersion,
 )
 from app.models.user import AccountStatus, User, UserRole
 from app.schemas.documents import (
     DocumentAuditListResponse,
     DocumentAuditResponse,
+    DocumentCategoryListResponse,
+    DocumentCategoryCount,
     DocumentListResponse,
     DocumentMetadataUpdate,
     DocumentPermissionListResponse,
     DocumentPermissionResponse,
     DocumentResponse,
+    DocumentRegistrySummaryResponse,
     DocumentSummaryResponse,
     DocumentVersionListResponse,
     DocumentVersionResponse,
@@ -69,10 +74,17 @@ from app.services.document_access import (
     require_owner,
     utc_now,
 )
-from app.services.antivirus import MalwareDetectedError, ScannerUnavailableError, scan_document_bytes
+from app.services.antivirus import (
+    MalwareDetectedError,
+    ScannerUnavailableError,
+    get_scanner_version,
+    scan_document_bytes,
+)
 from app.services.notifications import add_notification
 from app.services.s3_storage import (
+    StorageObjectNotFoundError,
     StorageUnavailableError,
+    copy_document_object,
     delete_document_object,
     get_document as get_s3_document,
     put_document,
@@ -101,6 +113,8 @@ _FILE_TYPES = {
     ".png": ("image/png", "png"),
     ".jpg": ("image/jpeg", "jpg"),
     ".jpeg": ("image/jpeg", "jpeg"),
+    ".gif": ("image/gif", "gif"),
+    ".webp": ("image/webp", "webp"),
     ".json": ("application/json", "json"),
     ".txt": ("text/plain", "txt"),
     ".log": ("text/plain", "log"),
@@ -236,6 +250,8 @@ def _validate_content(filename: str, content_type: str | None, content: bytes) -
         ".png": content.startswith(b"\x89PNG\r\n\x1a\n"),
         ".jpg": content.startswith(b"\xff\xd8\xff"),
         ".jpeg": content.startswith(b"\xff\xd8\xff"),
+        ".gif": len(content) >= 13 and content[:6] in {b"GIF87a", b"GIF89a"},
+        ".webp": len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP",
         ".doc": content.startswith(_OLE_SIGNATURE),
         ".xls": content.startswith(_OLE_SIGNATURE),
         ".ppt": content.startswith(_OLE_SIGNATURE),
@@ -323,23 +339,19 @@ def _document_response(
     user: User,
     *,
     registry: bool = False,
+    permission_count: int | None = None,
+    grant: DocumentPermission | None = None,
 ) -> DocumentResponse:
     version = document.current_version
     owner = document.owner
-    grant = permission_for(db, document.id, user.id)
+    if not registry:
+        grant = permission_for(db, document.id, user.id)
     is_owner = document.owner_user_id == user.id
     has_view = is_owner or bool(grant and grant.is_effective and grant.can_view)
     has_download = is_owner or bool(
         grant and grant.is_effective and grant.can_download
     )
     has_edit = is_owner or bool(grant and grant.is_effective and grant.can_edit)
-    count = None
-    if registry:
-        count = db.scalar(
-            select(func.count())
-            .select_from(DocumentPermission)
-            .where(DocumentPermission.document_id == document.id)
-        ) or 0
     permission_grantor = (
         db.get(User, grant.granted_by_user_id)
         if grant is not None and not is_owner
@@ -371,6 +383,7 @@ def _document_response(
         custom_metadata=document.custom_metadata,
         current_version_id=document.current_version_id,
         current_version_number=version.version_number if version else None,
+        current_version_status=version.status if version else None,
         content_type=version.content_type if version else None,
         size_bytes=version.size_bytes if version else None,
         checksum_sha256=version.checksum_sha256 if version else None,
@@ -381,7 +394,7 @@ def _document_response(
         can_download=has_download,
         can_edit=has_edit,
         is_owner=is_owner,
-        permission_count=count,
+        permission_count=permission_count,
     )
 
 
@@ -392,13 +405,72 @@ def _list_response(
     *,
     registry: bool = False,
 ) -> DocumentListResponse:
+    permission_counts: dict[uuid.UUID, int] = {}
+    user_grants: dict[uuid.UUID, DocumentPermission] = {}
+    if registry and documents:
+        document_ids = [document.id for document in documents]
+        now = utc_now()
+        count_rows = db.execute(
+            select(
+                DocumentPermission.document_id,
+                func.count(func.distinct(DocumentPermission.user_id)),
+            )
+            .join(Document, Document.id == DocumentPermission.document_id)
+            .where(
+                DocumentPermission.document_id.in_(document_ids),
+                DocumentPermission.can_view.is_(True),
+                DocumentPermission.revoked_at.is_(None),
+                (DocumentPermission.expires_at.is_(None))
+                | (DocumentPermission.expires_at > now),
+                Document.status == "ACTIVE",
+                Document.current_version_id.is_not(None),
+            )
+            .group_by(DocumentPermission.document_id)
+        )
+        permission_counts = {document_id: count for document_id, count in count_rows}
+        user_grants = {
+            grant.document_id: grant
+            for grant in db.scalars(
+                select(DocumentPermission).where(
+                    DocumentPermission.document_id.in_(document_ids),
+                    DocumentPermission.user_id == user.id,
+                )
+            )
+        }
     return DocumentListResponse(
         items=[
-            _document_response(db, document, user, registry=registry)
+            _document_response(
+                db,
+                document,
+                user,
+                registry=registry,
+                permission_count=permission_counts.get(document.id, 0),
+                grant=user_grants.get(document.id),
+            )
             for document in documents
         ],
         total=len(documents),
     )
+
+
+def _permission_status(permission: DocumentPermission, document: Document, recipient: User) -> str:
+    now = utc_now()
+    if permission.revoked_at is not None:
+        return "revoked"
+    if permission.expires_at is not None and permission.expires_at <= now:
+        return "expired"
+    version = document.current_version
+    if (
+        document.status != "ACTIVE"
+        or document.deleted_at is not None
+        or version is None
+        or version.status != "AVAILABLE"
+        or recipient.account_status != AccountStatus.ACTIVE
+    ):
+        return "unavailable"
+    if permission.expires_at is not None and permission.expires_at <= now + timedelta(days=30):
+        return "expiring_soon"
+    return "active"
 
 
 def _owner_document(
@@ -495,19 +567,121 @@ async def _scan_and_publish_version(
     version: DocumentVersion,
     user: User,
     content: bytes,
-) -> str:
-    """Publish only a clean version; leave unavailable scans pending."""
+    *,
+    quarantine_key: str | None = None,
+    quarantine_s3_version_id: str | None = None,
+    content_type: str | None = None,
+    checksum: str | None = None,
+) -> tuple[str, str | None]:
+    """Publish only a clean version to trusted storage; leave unavailable scans pending.
+
+    Returns (version_status, detection_name).
+    """
+    scan_started = utc_now()
+    scanner_version = await run_in_threadpool(get_scanner_version)
+    checksum_val = checksum or version.checksum_sha256
+
+    scan_record = DocumentScan(
+        document_id=document.id,
+        version_id=version.id,
+        scan_status="SCANNING",
+        original_filename=version.original_filename,
+        file_hash_sha256=checksum_val,
+        file_size_bytes=len(content),
+        scanner_name="ClamAV",
+        scanner_version=scanner_version,
+        scan_started_at=scan_started,
+    )
+    db.add(scan_record)
+    try:
+        db.flush()
+    except SQLAlchemyError:
+        pass
+
+    detection_name: str | None = None
     try:
         await run_in_threadpool(scan_document_bytes, content)
-    except ScannerUnavailableError:
-        return "PENDING_SCAN"
-    except MalwareDetectedError:
+    except ScannerUnavailableError as exc:
+        scan_record.scan_status = "SCAN_FAILED"
+        scan_record.failure_reason = str(exc)
+        scan_record.scan_completed_at = utc_now()
+        version.status = "PENDING_SCAN"
+        verdict = "scanner_unavailable"
+        result = "FAILED"
+    except MalwareDetectedError as exc:
+        detection_name = getattr(exc, "detection_name", None) or "Malware detected"
+        scan_record.scan_status = "INFECTED"
+        scan_record.detection_name = detection_name
+        scan_record.scan_completed_at = utc_now()
         version.status = "QUARANTINED"
+        version.scan_completed_at = utc_now()
         verdict = "infected"
         result = "FAILED"
+        if quarantine_key:
+            try:
+                await run_in_threadpool(
+                    delete_document_object,
+                    quarantine_key,
+                    quarantine_s3_version_id,
+                )
+            except Exception as del_exc:
+                logger.warning("Quarantine cleanup warning: %s", del_exc)
     else:
+        # CLEAN: promote from quarantine to trusted document storage!
+        base64_sha256 = base64.b64encode(bytes.fromhex(checksum_val)).decode("ascii")
+        trusted_key = version.storage_key
+        try:
+            if quarantine_key and quarantine_key != trusted_key:
+                try:
+                    s3_ver = await run_in_threadpool(
+                        copy_document_object,
+                        quarantine_key,
+                        trusted_key,
+                        content_type=content_type or version.content_type,
+                        checksum_sha256=base64_sha256,
+                        source_version_id=quarantine_s3_version_id,
+                    )
+                except Exception:
+                    s3_ver = await run_in_threadpool(
+                        put_document,
+                        trusted_key,
+                        BytesIO(content),
+                        content_type=content_type or version.content_type,
+                        checksum_sha256=base64_sha256,
+                    )
+                try:
+                    await run_in_threadpool(
+                        delete_document_object,
+                        quarantine_key,
+                        quarantine_s3_version_id,
+                    )
+                except Exception as del_exc:
+                    logger.warning("Quarantine deletion warning: %s", del_exc)
+            else:
+                s3_ver = await run_in_threadpool(
+                    put_document,
+                    trusted_key,
+                    BytesIO(content),
+                    content_type=content_type or version.content_type,
+                    checksum_sha256=base64_sha256,
+                )
+            version.s3_version_id = s3_ver
+        except StorageUnavailableError as storage_exc:
+            logger.error("Failed to promote clean document to trusted storage: %s", storage_exc)
+            scan_record.scan_status = "SCAN_FAILED"
+            scan_record.failure_reason = "Promotion to trusted storage failed"
+            scan_record.scan_completed_at = utc_now()
+            version.status = "FAILED"
+            db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail="The document could not be stored in trusted repository.",
+            ) from storage_exc
+
         version.status = "AVAILABLE"
         version.scan_completed_at = utc_now()
+        scan_record.scan_status = "CLEAN"
+        scan_record.scan_completed_at = utc_now()
         current_version = (
             db.get(DocumentVersion, document.current_version_id)
             if document.current_version_id is not None
@@ -518,8 +692,14 @@ async def _scan_and_publish_version(
         verdict = "clean"
         result = "SUCCESS"
 
-    if version.status == "QUARANTINED":
-        version.scan_completed_at = utc_now()
+    audit_details = {
+        "version_id": str(version.id),
+        "version_number": str(version.version_number),
+        "verdict": verdict,
+        "scanner": scanner_version,
+    }
+    if detection_name:
+        audit_details["detection"] = detection_name
     record_audit(
         db,
         request,
@@ -527,19 +707,15 @@ async def _scan_and_publish_version(
         action_type="DOCUMENT_SCAN_COMPLETED",
         result=result,
         document=document,
-        details={
-            "version_id": str(version.id),
-            "version_number": str(version.version_number),
-            "verdict": verdict,
-        },
+        details=audit_details,
     )
     try:
         db.commit()
     except SQLAlchemyError:
         db.rollback()
         logger.exception("Could not persist document scan result for version %s", version.id)
-        return "PENDING_SCAN"
-    return version.status
+        return "PENDING_SCAN", None
+    return version.status, detection_name
 
 
 def _response_stream(s3_object: dict[str, Any], on_error=None):
@@ -774,10 +950,11 @@ async def upload_document(
             detail="Document metadata could not be initialized.",
         ) from exc
 
+    quarantine_key = f"documents/quarantine/{document.id}/versions/{version.id}/content"
     try:
-        s3_version_id = await run_in_threadpool(
+        quarantine_s3_version_id = await run_in_threadpool(
             put_document,
-            object_key,
+            quarantine_key,
             BytesIO(content),
             content_type=content_type,
             checksum_sha256=base64.b64encode(
@@ -790,7 +967,6 @@ async def upload_document(
 
     try:
         version.status = "PENDING_SCAN"
-        version.s3_version_id = s3_version_id
         document.updated_at = utc_now()
         record_audit(
             db,
@@ -811,8 +987,8 @@ async def upload_document(
         try:
             await run_in_threadpool(
                 delete_document_object,
-                object_key,
-                s3_version_id,
+                quarantine_key,
+                quarantine_s3_version_id,
             )
         except StorageUnavailableError:
             logger.error(
@@ -843,13 +1019,17 @@ async def upload_document(
             status_code=503,
             detail="The upload could not be finalized. Please retry.",
         ) from exc
-    version_status = await _scan_and_publish_version(
+    version_status, detection_name = await _scan_and_publish_version(
         db,
         request,
         document,
         version,
         current_user,
         content,
+        quarantine_key=quarantine_key,
+        quarantine_s3_version_id=quarantine_s3_version_id,
+        content_type=content_type,
+        checksum=checksum,
     )
     if version_status != "AVAILABLE":
         response.status_code = status.HTTP_202_ACCEPTED
@@ -859,6 +1039,13 @@ async def upload_document(
     document_response = _document_response(db, document, current_user)
     document_response.latest_uploaded_version_number = version.version_number
     document_response.latest_uploaded_version_status = version_status
+    if version_status == "AVAILABLE":
+        document_response.scan_message = "Document uploaded and security scan passed."
+    elif version_status == "QUARANTINED":
+        document_response.scan_message = "Upload blocked: the file failed the security scan."
+        document_response.detection_name = detection_name
+    elif version_status == "PENDING_SCAN":
+        document_response.scan_message = "Security scanning is temporarily unavailable. Please try again later."
     return document_response
 
 
@@ -992,24 +1179,245 @@ async def list_document_registry(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     include_deleted: bool = False,
+    search: str | None = Query(default=None, max_length=120),
+    category: str | None = Query(default=None, max_length=80),
+    status_filter: str | None = Query(
+        default=None,
+        alias="status",
+        pattern="^(ACTIVE|ARCHIVED|DELETED)$",
+    ),
+    access_level: str | None = Query(
+        default=None,
+        pattern="^(SHARED|PRIVATE)$",
+    ),
+    registry_scope: str | None = Query(
+        default=None,
+        pattern="^(OWNED|SHARED_WITH_ME)$",
+    ),
+    document_id: uuid.UUID | None = None,
+    file_type: str | None = Query(default=None, max_length=20, pattern="^[A-Za-z0-9]+$"),
+    owner_id: uuid.UUID | None = None,
+    sort_by: str = Query(
+        default="created_at",
+        pattern="^(title|owner|category|created_at|updated_at|status|size_bytes|file_type|active_users)$",
+    ),
+    sort_direction: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
 ) -> DocumentListResponse:
-    filters = [] if include_deleted else [Document.status != "DELETED"]
+    filters = []
+    if status_filter:
+        filters.append(Document.status == status_filter)
+    elif not include_deleted:
+        filters.append(Document.status != "DELETED")
+    if category:
+        filters.append(Document.category == category)
+    if document_id:
+        filters.append(Document.id == document_id)
+    if owner_id:
+        filters.append(Document.owner_user_id == owner_id)
+    if registry_scope == "OWNED":
+        filters.append(Document.owner_user_id == current_admin.id)
+    elif registry_scope == "SHARED_WITH_ME":
+        filters.append(
+            Document.owner_user_id != current_admin.id,
+        )
+        filters.append(
+            Document.status == "ACTIVE",
+        )
+        filters.append(Document.current_version_id.is_not(None))
+        filters.append(
+            exists(
+                select(1).select_from(DocumentPermission).where(
+                    DocumentPermission.document_id == Document.id,
+                    DocumentPermission.user_id == current_admin.id,
+                    DocumentPermission.can_view.is_(True),
+                    DocumentPermission.revoked_at.is_(None),
+                    (DocumentPermission.expires_at.is_(None))
+                    | (DocumentPermission.expires_at > utc_now()),
+                )
+            )
+        )
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        owner_search = aliased(User)
+        version_search = aliased(DocumentVersion)
+        filters.append(
+            Document.title.ilike(pattern)
+            | Document.description.ilike(pattern)
+            | cast(Document.id, String).ilike(pattern)
+            | Document.category.ilike(pattern)
+            | exists(
+                select(1).select_from(owner_search).where(
+                    owner_search.id == Document.owner_user_id,
+                    owner_search.full_name.ilike(pattern)
+                    | owner_search.email.ilike(pattern),
+                )
+            )
+            | exists(
+                select(1).select_from(version_search).where(
+                    version_search.id == Document.current_version_id,
+                    version_search.original_filename.ilike(pattern),
+                )
+            )
+        )
+    if file_type:
+        file_type_version = aliased(DocumentVersion)
+        filters.append(
+            exists(
+                select(1).select_from(file_type_version).where(
+                    file_type_version.id == Document.current_version_id,
+                    func.lower(file_type_version.file_extension) == file_type.lower(),
+                )
+            )
+        )
+    now = utc_now()
+    active_grant = exists(
+        select(1).select_from(DocumentPermission).where(
+            DocumentPermission.document_id == Document.id,
+            DocumentPermission.can_view.is_(True),
+            DocumentPermission.revoked_at.is_(None),
+            (DocumentPermission.expires_at.is_(None))
+            | (DocumentPermission.expires_at > now),
+            Document.status == "ACTIVE",
+            Document.current_version_id.is_not(None),
+        )
+    )
+    if access_level == "SHARED":
+        filters.extend((Document.status == "ACTIVE", active_grant))
+    elif access_level == "PRIVATE":
+        filters.append(~active_grant)
+
+    count_statement = select(func.count()).select_from(Document).where(*filters)
     total = db.scalar(
-        select(func.count()).select_from(Document).where(*filters)
+        count_statement
     ) or 0
+    active_permission_count = (
+        select(func.count(func.distinct(DocumentPermission.user_id)))
+        .select_from(DocumentPermission)
+        .where(
+            DocumentPermission.document_id == Document.id,
+            DocumentPermission.can_view.is_(True),
+            DocumentPermission.revoked_at.is_(None),
+            (DocumentPermission.expires_at.is_(None))
+            | (DocumentPermission.expires_at > now),
+            Document.status == "ACTIVE",
+            Document.current_version_id.is_not(None),
+        )
+        .correlate(Document)
+        .scalar_subquery()
+    )
+    sort_columns = {
+        "title": Document.title,
+        "owner": User.full_name,
+        "category": Document.category,
+        "created_at": Document.created_at,
+        "updated_at": Document.updated_at,
+        "status": Document.status,
+        "size_bytes": DocumentVersion.size_bytes,
+        "file_type": DocumentVersion.file_extension,
+        "active_users": active_permission_count,
+    }
+    sort_column = sort_columns[sort_by]
     query = (
         select(Document)
         .options(joinedload(Document.owner), joinedload(Document.current_version))
+        .outerjoin(User, User.id == Document.owner_user_id)
+        .outerjoin(DocumentVersion, DocumentVersion.id == Document.current_version_id)
         .where(*filters)
-        .order_by(Document.updated_at.desc(), Document.id)
+        .order_by(
+            sort_column.desc() if sort_direction == "desc" else sort_column.asc(),
+            Document.id.asc(),
+        )
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
     documents = list(db.execute(query).unique().scalars())
     result = _list_response(db, documents, current_admin, registry=True)
     result.total = total
+    result.page = page
+    result.page_size = page_size
     return result
+
+
+@router.get(
+    "/registry/summary",
+    response_model=DocumentRegistrySummaryResponse,
+)
+async def get_document_registry_summary(
+    current_admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> DocumentRegistrySummaryResponse:
+    live_documents = Document.status != "DELETED"
+    total = db.scalar(
+        select(func.count()).select_from(Document).where(live_documents)
+    ) or 0
+    owned = db.scalar(
+        select(func.count()).select_from(Document).where(
+            live_documents,
+            Document.owner_user_id == current_admin.id,
+        )
+    ) or 0
+    now = utc_now()
+    shared = db.scalar(
+        select(func.count(func.distinct(Document.id)))
+        .select_from(Document)
+        .join(
+            DocumentPermission,
+            DocumentPermission.document_id == Document.id,
+        )
+        .where(
+            Document.owner_user_id != current_admin.id,
+            DocumentPermission.user_id == current_admin.id,
+            DocumentPermission.can_view.is_(True),
+            DocumentPermission.revoked_at.is_(None),
+            (DocumentPermission.expires_at.is_(None))
+            | (DocumentPermission.expires_at > now),
+            Document.status == "ACTIVE",
+            Document.current_version_id.is_not(None),
+        )
+    ) or 0
+    storage = db.scalar(
+        select(func.coalesce(func.sum(DocumentVersion.size_bytes), 0))
+        .select_from(Document)
+        .join(DocumentVersion, DocumentVersion.id == Document.current_version_id)
+        .where(live_documents)
+    ) or 0
+    return DocumentRegistrySummaryResponse(
+        total_documents=total,
+        owned_documents=owned,
+        shared_documents=shared,
+        storage_bytes=storage,
+    )
+
+
+@router.get(
+    "/registry/categories",
+    response_model=DocumentCategoryListResponse,
+)
+async def get_document_registry_categories(
+    current_admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> DocumentCategoryListResponse:
+    rows = db.execute(
+        select(Document.category, func.count(Document.id))
+        .where(
+            Document.status != "DELETED",
+            Document.category.is_not(None),
+            func.length(func.trim(Document.category)) > 0,
+        )
+        .group_by(Document.category)
+        .order_by(func.lower(Document.category), Document.category)
+    )
+    items = [
+        DocumentCategoryCount(name=name, count=count)
+        for name, count in rows
+    ]
+    total = db.scalar(
+        select(func.count()).select_from(Document).where(
+            Document.status != "DELETED",
+        )
+    ) or 0
+    return DocumentCategoryListResponse(total=total, items=items)
 
 
 @router.get("/users", response_model=list[UserOption])
@@ -1046,16 +1454,6 @@ async def get_document_metadata(
         "view",
         requested_id=document_id,
     )
-    record_audit(
-        db,
-        request,
-        actor_user_id=current_user.id,
-        action_type="DOCUMENT_VIEWED",
-        result="SUCCESS",
-        document=document,
-        details={"metadata_only": True},
-    )
-    db.commit()
     return _document_response(db, document, current_user)
 
 
@@ -1150,6 +1548,22 @@ async def view_document(
             version.s3_version_id,
         )
         _verify_object_size(s3_object, version)
+    except StorageObjectNotFoundError as exc:
+        logger.error("Authorized document preview source is missing")
+        record_audit(
+            db,
+            request,
+            actor_user_id=current_user.id,
+            action_type="DOCUMENT_VIEWED",
+            result="FAILED",
+            document=document,
+            details={"version_id": str(version.id), "reason": "storage_object_missing"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document file could not be found.",
+        ) from exc
     except Exception as exc:
         logger.error("Document preview retrieval failed (%s)", type(exc).__name__)
         record_audit(
@@ -1166,17 +1580,6 @@ async def view_document(
             status_code=503,
             detail="The document file is temporarily unavailable.",
         ) from exc
-    record_audit(
-        db,
-        request,
-        actor_user_id=current_user.id,
-        action_type="DOCUMENT_VIEWED",
-        result="SUCCESS",
-        document=document,
-        details={"version_id": str(version.id)},
-    )
-    db.commit()
-
     def mark_stream_failure(exc: Exception) -> None:
         logger.error("Document preview stream failed (%s)", type(exc).__name__)
         try:
@@ -1205,6 +1608,36 @@ async def view_document(
         inline=True,
         on_stream_error=mark_stream_failure,
     )
+
+
+@router.post("/{document_id}/preview-success", status_code=status.HTTP_204_NO_CONTENT)
+async def report_document_preview_success(
+    document_id: uuid.UUID,
+    request: Request,
+    version_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Record a view only after the authorized client rendered the retrieved version."""
+    document, version = _load_accessible_version(
+        db,
+        request,
+        document_id,
+        version_id,
+        current_user,
+        "view",
+    )
+    record_audit(
+        db,
+        request,
+        actor_user_id=current_user.id,
+        action_type="DOCUMENT_VIEWED",
+        result="SUCCESS",
+        document=document,
+        details={"version_id": str(version.id)},
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{document_id}/preview-failure", status_code=status.HTTP_204_NO_CONTENT)
@@ -1265,6 +1698,21 @@ async def download_document(
             version.s3_version_id,
         )
         _verify_object_size(s3_object, version)
+    except StorageObjectNotFoundError as exc:
+        record_audit(
+            db,
+            request,
+            actor_user_id=current_user.id,
+            action_type="DOCUMENT_DOWNLOADED",
+            result="FAILED",
+            document=document,
+            details={"version_id": str(version.id), "reason": "storage_object_missing"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document file could not be found.",
+        ) from exc
     except StorageUnavailableError as exc:
         record_audit(
             db,
@@ -1378,10 +1826,11 @@ async def replace_document_file(
             status_code=503,
             detail="Document version metadata could not be initialized.",
         ) from exc
+    quarantine_key = f"documents/quarantine/{document.id}/versions/{version.id}/content"
     try:
-        s3_version_id = await run_in_threadpool(
+        quarantine_s3_version_id = await run_in_threadpool(
             put_document,
-            object_key,
+            quarantine_key,
             BytesIO(content),
             content_type=content_type,
             checksum_sha256=base64.b64encode(
@@ -1393,7 +1842,6 @@ async def replace_document_file(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         version.status = "PENDING_SCAN"
-        version.s3_version_id = s3_version_id
         document.updated_at = utc_now()
         record_audit(
             db,
@@ -1414,8 +1862,8 @@ async def replace_document_file(
         try:
             await run_in_threadpool(
                 delete_document_object,
-                object_key,
-                s3_version_id,
+                quarantine_key,
+                quarantine_s3_version_id,
             )
         except StorageUnavailableError:
             logger.error(
@@ -1450,13 +1898,17 @@ async def replace_document_file(
             status_code=503,
             detail="The replacement could not be finalized. Please retry.",
         ) from exc
-    version_status = await _scan_and_publish_version(
+    version_status, detection_name = await _scan_and_publish_version(
         db,
         request,
         document,
         version,
         current_user,
         content,
+        quarantine_key=quarantine_key,
+        quarantine_s3_version_id=quarantine_s3_version_id,
+        content_type=content_type,
+        checksum=checksum,
     )
     if version_status != "AVAILABLE":
         response.status_code = status.HTTP_202_ACCEPTED
@@ -1466,6 +1918,13 @@ async def replace_document_file(
     document_response = _document_response(db, document, current_user)
     document_response.latest_uploaded_version_number = version.version_number
     document_response.latest_uploaded_version_status = version_status
+    if version_status == "AVAILABLE":
+        document_response.scan_message = "Document uploaded and security scan passed."
+    elif version_status == "QUARANTINED":
+        document_response.scan_message = "Upload blocked: the file failed the security scan."
+        document_response.detection_name = detection_name
+    elif version_status == "PENDING_SCAN":
+        document_response.scan_message = "Security scanning is temporarily unavailable. Please try again later."
     return document_response
 
 
@@ -1523,7 +1982,10 @@ async def list_document_permissions(
         select(DocumentPermission, recipient, grantor)
         .join(recipient, recipient.id == DocumentPermission.user_id)
         .join(grantor, grantor.id == DocumentPermission.granted_by_user_id)
-        .where(DocumentPermission.document_id == document.id)
+        .where(
+            DocumentPermission.document_id == document.id,
+            DocumentPermission.user_id != document.owner_user_id,
+        )
         .order_by(DocumentPermission.granted_at.desc())
     ).all()
     return DocumentPermissionListResponse(
@@ -1547,6 +2009,8 @@ async def list_document_permissions(
                 revoked_at=permission.revoked_at,
                 revoked_by_user_id=permission.revoked_by_user_id,
                 is_effective=permission.is_effective,
+                updated_at=permission.updated_at,
+                status=_permission_status(permission, document, user),
             )
             for permission, user, granted_by in rows
         ]
@@ -1571,6 +2035,11 @@ async def grant_document_permission(
         current_user,
         "grant_permission",
     )
+    if document.current_version is None or document.current_version.status != "AVAILABLE":
+        raise HTTPException(
+            status_code=409,
+            detail="This document is not currently available for sharing.",
+        )
     recipient = db.get(User, body.user_id)
     if (
         recipient is None
@@ -1651,6 +2120,8 @@ async def grant_document_permission(
         revoked_at=grant.revoked_at,
         revoked_by_user_id=grant.revoked_by_user_id,
         is_effective=grant.is_effective,
+        updated_at=grant.updated_at,
+        status=_permission_status(grant, document, recipient),
     )
 
 
@@ -1673,7 +2144,11 @@ async def revoke_document_permission(
         "revoke_permission",
     )
     grant = db.get(DocumentPermission, permission_id)
-    if grant is None or grant.document_id != document.id:
+    if (
+        grant is None
+        or grant.document_id != document.id
+        or grant.user_id == document.owner_user_id
+    ):
         raise HTTPException(status_code=404, detail="Permission not found.")
     if grant.revoked_at is None:
         grant.revoked_at = utc_now()

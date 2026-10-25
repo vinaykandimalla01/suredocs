@@ -17,11 +17,21 @@ class FakeResult:
     def one(self):
         return (124, 110, 14, 482)
 
+    def all(self):
+        return []
+
 
 class FakeSession:
+    def __init__(self):
+        self.statements = []
+
     def execute(self, statement):
-        self.statement = statement
+        self.statements.append(statement)
         return FakeResult()
+
+    def scalar(self, statement):
+        self.statements.append(statement)
+        return 482
 
 
 def make_user(role: UserRole) -> User:
@@ -40,11 +50,23 @@ def test_dashboard_summary_requires_an_administrator():
     app.dependency_overrides.clear()
     try:
         with TestClient(app) as client:
-            assert client.get("/api/admin/dashboard/summary").status_code == 401
+            for path in (
+                "/api/admin/dashboard/summary",
+                "/api/admin/dashboard/storage",
+                "/api/admin/dashboard/denied-requests",
+                "/api/admin/dashboard/operations",
+            ):
+                assert client.get(path).status_code == 401
 
             employee = make_user(UserRole.EMPLOYEE)
             app.dependency_overrides[get_current_user] = lambda: employee
-            assert client.get("/api/admin/dashboard/summary").status_code == 403
+            for path in (
+                "/api/admin/dashboard/summary",
+                "/api/admin/dashboard/storage",
+                "/api/admin/dashboard/denied-requests",
+                "/api/admin/dashboard/operations",
+            ):
+                assert client.get(path).status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -63,22 +85,24 @@ def test_dashboard_summary_returns_only_count_metrics_and_excludes_deleted_docs(
     app.dependency_overrides[get_db] = dashboard_db
     try:
         with TestClient(app) as client:
-            response = client.get("/api/admin/dashboard/summary")
+            response = client.get("/api/admin/dashboard/summary?days=7")
 
         assert response.status_code == 200
-        assert response.json() == {
-            "users": {"total": 124, "active": 110, "disabled": 14},
-            "documents": {"total": 482},
-        }
+        payload = response.json()
+        assert payload["users"] == {"total": 124, "active": 110, "disabled": 14}
+        assert payload["documents"] == {"total": 482}
+        assert payload["period_days"] == 7
+        assert payload["trends"]["users"]["change"] == 0
+        assert payload["trends"]["users"]["points"] == [124] * 7
+        assert payload["trends"]["documents"]["points"] == [482] * 7
         assert "password_hash" not in response.text
         assert "session_token_hash" not in response.text
 
-        sql = str(
-            fake_db.statement.compile(
-                dialect=postgresql.dialect(),
-                compile_kwargs={"literal_binds": True},
-            )
-        )
+        sql_statements = [
+            str(statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+            for statement in fake_db.statements
+        ]
+        sql = "\n".join(sql_statements)
         assert "users.account_status = 'ACTIVE'" in sql
         assert "users.account_status = 'DISABLED'" in sql
         assert "documents.status != 'DELETED'" in sql

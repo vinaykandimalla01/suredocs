@@ -5,6 +5,7 @@ import hashlib
 from datetime import datetime, timezone
 
 import pytest
+from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -16,7 +17,11 @@ from app.models.user import User
 from app.routers.documents import _file_response, _response_stream, _validate_content
 from app.schemas.documents import PermissionGrantRequest
 from app.services.antivirus import MalwareDetectedError, ScannerUnavailableError
-from app.services.s3_storage import StorageUnavailableError
+from app.services.s3_storage import (
+    StorageObjectNotFoundError,
+    StorageUnavailableError,
+    get_document as get_s3_object,
+)
 
 _PDF = b"%PDF-1.7\nSureDocs document test\n"
 
@@ -96,6 +101,17 @@ def test_additional_document_formats_are_validated_and_active_content_is_sandbox
     assert "sandbox" in response.headers["content-security-policy"]
     assert "default-src 'none'" in response.headers["content-security-policy"]
     assert "connect-src 'none'" in response.headers["content-security-policy"]
+
+
+def test_gif_and_webp_images_require_matching_content_signatures() -> None:
+    gif = b"GIF89a\x01\x00\x01\x00\x00\x00\x00"
+    webp = b"RIFF\x04\x00\x00\x00WEBP"
+    assert _validate_content("animation.gif", "image/gif", gif) == ("image/gif", "gif")
+    assert _validate_content("picture.webp", "image/webp", webp) == ("image/webp", "webp")
+    with pytest.raises(HTTPException):
+        _validate_content("wrong.gif", "image/gif", b"<html>not an image</html>")
+    with pytest.raises(HTTPException):
+        _validate_content("wrong.webp", "image/webp", b"RIFF----WAVE")
 
 
 def test_interrupted_s3_stream_reports_failure_and_closes_the_body() -> None:
@@ -453,6 +469,19 @@ def test_view_grant_allows_view_but_not_download_and_admin_is_not_implicitly_aut
     assert viewed.headers["content-security-policy"] == "sandbox"
     assert viewed.headers["x-content-type-options"] == "nosniff"
     assert viewed.headers["cache-control"] == "private, no-store"
+    assert db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "DOCUMENT_VIEWED",
+            DocumentAuditLog.result == "SUCCESS",
+        )
+    ).scalar_one_or_none() is None
+    rendered = client.post(
+        f"/api/documents/{document.id}/preview-success"
+        f"?version_id={document.current_version_id}",
+        json={},
+    )
+    assert rendered.status_code == 204
     success_event = db.execute(
         select(DocumentAuditLog).where(
             DocumentAuditLog.document_id_snapshot == document.id,
@@ -474,7 +503,201 @@ def test_view_grant_allows_view_but_not_download_and_admin_is_not_implicitly_aut
     _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
     revoked_view = client.get(f"/api/documents/{document.id}/view")
     assert revoked_view.status_code == 404
+    revoked_render = client.post(
+        f"/api/documents/{document.id}/preview-success"
+        f"?version_id={document.current_version_id}",
+        json={},
+    )
+    assert revoked_render.status_code == 404
     assert len(fetched) == 1
+
+
+def test_admin_registry_filters_categories_and_aggregations(
+    client: TestClient,
+    db: Session,
+    active_admin: User,
+    active_employee: User,
+) -> None:
+    _login(client, active_admin.email, "SecureAdmin1!")
+    initial_summary = client.get("/api/documents/registry/summary").json()
+    initial_categories = client.get("/api/documents/registry/categories").json()
+    initial_finance_count = next(
+        (
+            item["count"]
+            for item in initial_categories["items"]
+            if item["name"] == "Finance"
+        ),
+        0,
+    )
+    document = _seed_document(db, active_employee)
+    document.title = "Finance planning"
+    document.category = "Finance"
+    owned_document = _seed_document(db, active_admin)
+    db.add(
+        DocumentPermission(
+            document_id=document.id,
+            user_id=active_admin.id,
+            can_view=True,
+            can_download=False,
+            can_edit=False,
+            granted_by_user_id=active_employee.id,
+            granted_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+
+    response = client.get(
+        "/api/documents/registry",
+        params={
+            "document_id": str(document.id),
+            "category": "Finance",
+            "status": "ACTIVE",
+            "access_level": "SHARED",
+            "sort_by": "title",
+            "sort_direction": "asc",
+            "page": 1,
+            "page_size": 10,
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["page"] == 1
+    assert payload["page_size"] == 10
+    assert payload["items"][0]["id"] == str(document.id)
+    assert payload["items"][0]["permission_count"] == 1
+    assert payload["items"][0]["can_view"] is True
+    assert payload["items"][0]["current_version_status"] == "AVAILABLE"
+    assert "storage_key" not in payload["items"][0]
+    private = client.get(
+        "/api/documents/registry",
+        params={"document_id": str(document.id), "access_level": "PRIVATE"},
+    )
+    assert private.status_code == 200
+    assert private.json()["total"] == 0
+    owner_search = client.get(
+        "/api/documents/registry",
+        params={"search": active_employee.full_name, "category": "Finance"},
+    )
+    assert any(item["id"] == str(document.id) for item in owner_search.json()["items"])
+    owned_scope = client.get(
+        "/api/documents/registry",
+        params={
+            "registry_scope": "OWNED",
+            "document_id": str(owned_document.id),
+        },
+    )
+    assert owned_scope.status_code == 200
+    assert [item["id"] for item in owned_scope.json()["items"]] == [
+        str(owned_document.id)
+    ]
+    assert owned_scope.json()["total"] == 1
+    shared_scope = client.get(
+        "/api/documents/registry",
+        params={
+            "registry_scope": "SHARED_WITH_ME",
+            "document_id": str(document.id),
+        },
+    )
+    assert shared_scope.status_code == 200
+    assert [item["id"] for item in shared_scope.json()["items"]] == [
+        str(document.id)
+    ]
+    not_shared_with_me = client.get(
+        "/api/documents/registry",
+        params={
+            "registry_scope": "SHARED_WITH_ME",
+            "document_id": str(owned_document.id),
+        },
+    )
+    assert not_shared_with_me.status_code == 200
+    assert not_shared_with_me.json()["total"] == 0
+
+    categories = client.get("/api/documents/registry/categories")
+    assert categories.status_code == 200, categories.text
+    assert {"name": "Finance", "count": initial_finance_count + 1} in categories.json()["items"]
+    assert categories.json()["total"] == initial_categories["total"] + 2
+
+    summary = client.get("/api/documents/registry/summary")
+    assert summary.status_code == 200, summary.text
+    assert summary.json() == {
+        "total_documents": initial_summary["total_documents"] + 2,
+        "owned_documents": initial_summary["owned_documents"] + 1,
+        "shared_documents": initial_summary["shared_documents"] + 1,
+        "storage_bytes": initial_summary["storage_bytes"] + (2 * len(_PDF)),
+    }
+
+
+def test_admin_registry_rejects_unsupported_filter_values(
+    client: TestClient,
+    active_admin: User,
+) -> None:
+    _login(client, active_admin.email, "SecureAdmin1!")
+    response = client.get(
+        "/api/documents/registry",
+        params={"status": "PURGED", "sort_by": "untrusted_column"},
+    )
+    assert response.status_code == 422
+
+
+def test_registry_aggregates_and_listing_remain_admin_only(
+    client: TestClient,
+    active_employee: User,
+) -> None:
+    _login(client, active_employee.email, "SecureEmp1!")
+    for endpoint in (
+        "/api/documents/registry",
+        "/api/documents/registry/summary",
+        "/api/documents/registry/categories",
+    ):
+        assert client.get(endpoint).status_code == 403
+
+
+def test_owner_view_is_audited_only_after_client_reports_render_success(
+    client: TestClient,
+    db: Session,
+    active_employee: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = _seed_document(db, active_employee)
+
+    class FakeBody:
+        def iter_chunks(self, chunk_size):
+            yield _PDF
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "app.routers.documents.get_s3_document",
+        lambda *args, **kwargs: {"Body": FakeBody(), "ContentLength": len(_PDF)},
+    )
+    _login(client, active_employee.email, "SecureEmp1!")
+    response = client.get(f"/api/documents/{document.id}/view")
+    assert response.status_code == 200
+    assert response.content == _PDF
+    assert db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "DOCUMENT_VIEWED",
+            DocumentAuditLog.result == "SUCCESS",
+        )
+    ).scalar_one_or_none() is None
+
+    rendered = client.post(
+        f"/api/documents/{document.id}/preview-success"
+        f"?version_id={document.current_version_id}",
+        json={},
+    )
+    assert rendered.status_code == 204
+    event = db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "DOCUMENT_VIEWED",
+            DocumentAuditLog.result == "SUCCESS",
+        )
+    ).scalar_one()
+    assert event.actor_user_id == active_employee.id
 
 
 def test_unauthenticated_view_is_audited_without_retrieving_s3_content(
@@ -528,6 +751,53 @@ def test_s3_view_failure_is_audited_as_failed(
     ).scalar_one()
     assert event.result == "FAILED"
     assert event.details["reason"] == "storage_unavailable"
+
+
+def test_missing_s3_object_returns_not_found_without_exposing_storage_key(
+    client: TestClient,
+    db: Session,
+    active_employee: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = _seed_document(db, active_employee)
+
+    def missing_object(*args, **kwargs):
+        raise StorageObjectNotFoundError("private key must not reach the client")
+
+    monkeypatch.setattr(
+        "app.routers.documents.get_s3_document",
+        missing_object,
+    )
+    _login(client, active_employee.email, "SecureEmp1!")
+
+    response = client.get(f"/api/documents/{document.id}/view")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "The document file could not be found."
+    assert "storage_key" not in response.text
+    event = db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "DOCUMENT_VIEWED",
+            DocumentAuditLog.result == "FAILED",
+        )
+    ).scalar_one()
+    assert event.details["reason"] == "storage_object_missing"
+
+
+def test_s3_no_such_key_is_classified_as_a_missing_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MissingS3Client:
+        def get_object(self, **kwargs):
+            raise ClientError(
+                {"Error": {"Code": "NoSuchKey", "Message": "missing"}},
+                "GetObject",
+            )
+
+    monkeypatch.setattr("app.services.s3_storage.get_s3_client", MissingS3Client)
+    with pytest.raises(StorageObjectNotFoundError):
+        get_s3_object("documents/private/version/content", "s3-version-id")
 
 
 def test_client_side_preview_failure_is_audited_without_document_content(
@@ -597,9 +867,8 @@ def test_interrupted_view_delivery_appends_failed_audit_without_rewriting_histor
             DocumentAuditLog.action_type == "DOCUMENT_VIEWED",
         )
     ).scalars().all()
-    assert len(events) == 2
+    assert len(events) == 1
     assert {(event.result, event.details.get("reason")) for event in events} == {
-        ("SUCCESS", None),
         ("FAILED", "stream_interrupted"),
     }
 

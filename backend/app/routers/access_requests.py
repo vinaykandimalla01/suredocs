@@ -21,6 +21,7 @@ from app.schemas.access_requests import (
     AccessRequestDecision,
     AccessRequestPageResponse,
     AccessRequestResponse,
+    AccessRequestSummaryResponse,
 )
 from app.services.document_access import get_document, record_audit
 from app.services.notifications import add_notification
@@ -148,7 +149,12 @@ async def submit_access_request(
         db, request, actor_user_id=user.id,
         action_type="ACCESS_REQUEST_SUBMITTED", result="SUCCESS",
         document=document, target_user_id=document.owner_user_id,
-        details={"access_request_id": str(access_request.id), "requested_permissions": access_request.requested_permissions},
+        details={
+            "access_request_id": str(access_request.id),
+            "requested_permissions": access_request.requested_permissions,
+            "previous_status": None,
+            "new_status": "PENDING",
+        },
     )
     add_notification(
         db,
@@ -176,6 +182,9 @@ async def list_access_requests(
     status_filter: Literal["PENDING", "APPROVED", "DENIED", "CANCELLED", "EXPIRED"] | None = Query(default=None, alias="status"),
     document_id: uuid.UUID | None = None,
     search: str | None = Query(default=None, max_length=120),
+    requester_user_id: uuid.UUID | None = None,
+    requested_after: datetime | None = None,
+    requested_before: datetime | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -201,13 +210,36 @@ async def list_access_requests(
         else or_(AccessRequest.requester_user_id == user.id, Document.owner_user_id == user.id)
     )
     criteria = [scope_clause]
+    if requested_after is not None and requested_after.tzinfo is None:
+        raise HTTPException(status_code=422, detail="The start date must include a timezone.")
+    if requested_before is not None and requested_before.tzinfo is None:
+        raise HTTPException(status_code=422, detail="The end date must include a timezone.")
+    if (
+        requested_after is not None
+        and requested_before is not None
+        and requested_after > requested_before
+    ):
+        raise HTTPException(status_code=422, detail="The start date must not follow the end date.")
     if status_filter:
         criteria.append(AccessRequest.status == status_filter)
     if document_id:
         criteria.append(AccessRequest.document_id == document_id)
+    if requester_user_id:
+        criteria.append(AccessRequest.requester_user_id == requester_user_id)
+    if requested_after:
+        criteria.append(AccessRequest.requested_at >= requested_after)
+    if requested_before:
+        criteria.append(AccessRequest.requested_at <= requested_before)
     if search and search.strip():
         term = f"%{search.strip()}%"
-        criteria.append(or_(Document.title.ilike(term), requester.full_name.ilike(term), requester.email.ilike(term)))
+        criteria.append(
+            or_(
+                Document.title.ilike(term),
+                AccessRequest.reason.ilike(term),
+                requester.full_name.ilike(term),
+                requester.email.ilike(term),
+            )
+        )
     count_stmt = select(func.count()).select_from(AccessRequest).join(Document, Document.id == AccessRequest.document_id).join(requester, requester.id == AccessRequest.requester_user_id).where(*criteria)
     total = db.scalar(count_stmt) or 0
     rows = db.execute(
@@ -221,6 +253,54 @@ async def list_access_requests(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/summary", response_model=AccessRequestSummaryResponse)
+async def access_request_summary(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AccessRequestSummaryResponse:
+    pending_requests = db.scalar(
+        select(func.count(AccessRequest.id))
+        .join(Document, Document.id == AccessRequest.document_id)
+        .where(
+            Document.owner_user_id == user.id,
+            AccessRequest.status == "PENDING",
+        )
+    ) or 0
+    denied_requests = db.scalar(
+        select(func.count(AccessRequest.id))
+        .join(Document, Document.id == AccessRequest.document_id)
+        .where(
+            or_(
+                AccessRequest.requester_user_id == user.id,
+                Document.owner_user_id == user.id,
+            ),
+            AccessRequest.status == "DENIED",
+        )
+    ) or 0
+    users_with_access = db.scalar(
+        select(func.count(func.distinct(DocumentPermission.user_id)))
+        .select_from(DocumentPermission)
+        .join(Document, Document.id == DocumentPermission.document_id)
+        .join(User, User.id == DocumentPermission.user_id)
+        .where(
+            Document.owner_user_id == user.id,
+            DocumentPermission.user_id != user.id,
+            DocumentPermission.can_view.is_(True),
+            DocumentPermission.revoked_at.is_(None),
+            (DocumentPermission.expires_at.is_(None))
+            | (DocumentPermission.expires_at > datetime.now(timezone.utc)),
+            Document.status == "ACTIVE",
+            Document.deleted_at.is_(None),
+            User.account_status == AccountStatus.ACTIVE,
+        )
+    ) or 0
+    return AccessRequestSummaryResponse(
+        pending_requests=pending_requests,
+        users_with_access=users_with_access,
+        denied_requests=denied_requests,
     )
 
 
@@ -318,6 +398,9 @@ async def _decide_access_request(
         details={
             "access_request_id": str(access_request.id),
             "permission_id": str(grant.id) if grant else None,
+            "requested_permissions": access_request.requested_permissions,
+            "previous_status": "PENDING",
+            "new_status": access_request.status,
             "decision_reason": decision.decision_reason,
         },
     )
@@ -392,7 +475,11 @@ async def cancel_access_request(
     record_audit(
         db, request, actor_user_id=user.id, action_type="ACCESS_REQUEST_CANCELLED",
         result="SUCCESS", document=document, target_user_id=owner.id,
-        details={"access_request_id": str(access_request.id)},
+        details={
+            "access_request_id": str(access_request.id),
+            "previous_status": "PENDING",
+            "new_status": "CANCELLED",
+        },
     )
     db.commit()
     return _response(access_request, document, version, requester, owner, user)

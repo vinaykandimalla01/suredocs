@@ -81,11 +81,39 @@ def test_access_request_approval_creates_scoped_edit_grant_and_notifications(
         "can_download": False,
         "can_edit": True,
     }
+    submit_audit = db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "ACCESS_REQUEST_SUBMITTED",
+        )
+    ).scalar_one()
+    assert submit_audit.details["previous_status"] is None
+    assert submit_audit.details["new_status"] == "PENDING"
 
     mine = client.get("/api/access-requests?scope=mine&status=PENDING&page=1&page_size=10")
     assert mine.status_code == 200
     assert mine.json()["total"] == 1
     assert mine.json()["items"][0]["id"] == request_id
+    search_result = client.get(
+        "/api/access-requests?scope=mine&search=update%20the%20report"
+    )
+    assert search_result.status_code == 200
+    assert search_result.json()["total"] == 1
+    requester_date_filter = client.get(
+        "/api/access-requests",
+        params={
+            "scope": "mine",
+            "requester_user_id": str(active_admin.id),
+            "requested_after": "2000-01-01T00:00:00Z",
+            "requested_before": "2100-01-01T00:00:00Z",
+        },
+    )
+    assert requester_date_filter.status_code == 200
+    assert requester_date_filter.json()["total"] == 1
+    invalid_date_filter = client.get(
+        "/api/access-requests?scope=mine&requested_after=2026-10-25T00:00:00"
+    )
+    assert invalid_date_filter.status_code == 422
     assert client.get("/api/access-requests?scope=owned").json()["total"] == 0
     assert db.execute(
         select(Notification).where(Notification.recipient_user_id == active_employee.id)
@@ -97,6 +125,10 @@ def test_access_request_approval_creates_scoped_edit_grant_and_notifications(
     owned = client.get("/api/access-requests?scope=owned&status=PENDING")
     assert owned.status_code == 200
     assert owned.json()["total"] == 1
+    before_approval_summary = client.get("/api/access-requests/summary")
+    assert before_approval_summary.status_code == 200
+    assert before_approval_summary.json()["pending_requests"] == 1
+    assert before_approval_summary.json()["users_with_access"] == 0
     scoped_owned = client.get(
         f"/api/access-requests?scope=owned&status=PENDING&document_id={document.id}&page=1&page_size=1"
     )
@@ -105,6 +137,10 @@ def test_access_request_approval_creates_scoped_edit_grant_and_notifications(
     approved = client.post(f"/api/access-requests/{request_id}/approve", json={"decision_reason": "Approved."})
     assert approved.status_code == 200, approved.text
     assert approved.json()["status"] == "APPROVED"
+    after_approval_summary = client.get("/api/access-requests/summary")
+    assert after_approval_summary.status_code == 200
+    assert after_approval_summary.json()["pending_requests"] == 0
+    assert after_approval_summary.json()["users_with_access"] == 1
     grant = db.execute(
         select(DocumentPermission).where(
             DocumentPermission.document_id == document.id,
@@ -123,6 +159,14 @@ def test_access_request_approval_creates_scoped_edit_grant_and_notifications(
         ).scalars()
     )
     assert {"ACCESS_REQUEST_SUBMITTED", "ACCESS_REQUEST_APPROVED", "PERMISSION_GRANTED"} <= audit_actions
+    approval_audit = db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "ACCESS_REQUEST_APPROVED",
+        )
+    ).scalar_one()
+    assert approval_audit.details["previous_status"] == "PENDING"
+    assert approval_audit.details["new_status"] == "APPROVED"
     assert db.execute(
         select(Notification).where(Notification.recipient_user_id == active_admin.id)
     ).scalar_one().notification_type == "ACCESS_REQUEST_APPROVED"
@@ -175,6 +219,18 @@ def test_access_request_duplicate_deny_cancel_and_requester_scoping(
     )
     assert denied.status_code == 200, denied.text
     assert denied.json()["status"] == "DENIED"
+    denied_summary = client.get("/api/access-requests/summary")
+    assert denied_summary.status_code == 200
+    assert denied_summary.json()["denied_requests"] == 1
+    assert denied_summary.json()["users_with_access"] == 0
+    denial_audit = db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "ACCESS_REQUEST_DENIED",
+        )
+    ).scalar_one()
+    assert denial_audit.details["previous_status"] == "PENDING"
+    assert denial_audit.details["new_status"] == "DENIED"
     assert db.execute(
         select(DocumentPermission).where(DocumentPermission.document_id == document.id)
     ).scalar_one_or_none() is None

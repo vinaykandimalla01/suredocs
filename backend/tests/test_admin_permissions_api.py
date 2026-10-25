@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.models.documents import Document, DocumentAuditLog, DocumentPermission, DocumentVersion
+from app.models.persistence import Notification
 from app.models.user import AccountStatus, User, UserRole
 
 _PDF = b"%PDF-1.7\npermission admin test\n"
@@ -206,6 +207,12 @@ def test_admin_revoke_changes_only_selected_active_grant_and_audits_reason(
     assert audit.details["permission_id"] == str(selected_grant.id)
     assert audit.details["reason"] == "Access is no longer required for this review."
     assert audit.details["can_view"] is True
+    notification = db.query(Notification).filter_by(
+        recipient_user_id=recipient.id,
+        notification_type="ACCESS_REVOKED",
+    ).one()
+    assert notification.document_id == document.id
+    assert notification.metadata_json["permission_id"] == str(selected_grant.id)
 
     repeated = client.request(
         "DELETE",
@@ -253,3 +260,177 @@ def test_admin_revoke_validates_reason_scope_and_owner_protection(
         json={"reason": "Test owner guard."},
     )
     assert owner_revoke.status_code == 409
+
+
+def test_admin_permissions_summary_and_trends_and_distribution(
+    client: TestClient,
+    db: Session,
+    active_admin: User,
+    active_employee: User,
+) -> None:
+    _seed_document_and_grants(db, active_employee)
+    _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+
+    # 1. Summary
+    res = client.get("/api/admin/permissions/summary?range=30d")
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert "total_grants" in data
+    assert "read_grants" in data
+    assert "download_grants" in data
+    assert "edit_grants" in data
+    assert "active_grants" in data
+    assert "expired_grants" in data
+    assert "revoked_grants" in data
+    assert data["total_grants"] >= 2
+    assert data["active_grants"] >= 2
+
+    # 2. Trends
+    trends_res = client.get("/api/admin/permissions/trends?range=30d&status=all")
+    assert trends_res.status_code == 200, trends_res.text
+    trends = trends_res.json()
+    assert isinstance(trends, list)
+    assert len(trends) > 0
+    assert "date" in trends[0]
+    assert "read" in trends[0]
+    assert "download" in trends[0]
+    assert "edit" in trends[0]
+
+    # 3. Distribution
+    dist_res = client.get("/api/admin/permissions/distribution?range=30d&status=all")
+    assert dist_res.status_code == 200, dist_res.text
+    dist = dist_res.json()
+    assert dist["total"] >= 2
+    assert len(dist["types"]) == 3
+    type_names = {item["type"] for item in dist["types"]}
+    assert type_names == {"Read", "Download", "Edit"}
+
+
+def test_admin_permissions_top_documents(
+    client: TestClient,
+    db: Session,
+    active_admin: User,
+    active_employee: User,
+) -> None:
+    _seed_document_and_grants(db, active_employee)
+    _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+
+    res = client.get("/api/admin/permissions/top-documents?range=all&limit=5")
+    assert res.status_code == 200, res.text
+    items = res.json()
+    assert isinstance(items, list)
+    assert len(items) > 0
+    assert "id" in items[0]
+    assert "title" in items[0]
+    assert "grant_count" in items[0]
+    assert "percentage" in items[0]
+
+
+def test_admin_permissions_csv_export(
+    client: TestClient,
+    db: Session,
+    active_admin: User,
+    active_employee: User,
+) -> None:
+    _seed_document_and_grants(db, active_employee)
+    _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+
+    res = client.get("/api/admin/permissions/export?status=active")
+    assert res.status_code == 200
+    assert "text/csv" in res.headers["content-type"]
+    assert "attachment; filename=" in res.headers["content-disposition"]
+    text = res.text
+    assert "Grant ID" in text
+    assert "Document Name" in text
+    assert "Grantee Name" in text
+    assert "Permission Type" in text
+
+
+def test_admin_grant_permission_workflow_and_audit(
+    client: TestClient,
+    db: Session,
+    active_admin: User,
+    active_employee: User,
+) -> None:
+    doc, _, _ = _seed_document_and_grants(db, active_employee)
+    _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+
+    # Check eligible users
+    eligible = client.get(f"/api/admin/permissions/documents/{doc.id}/eligible-users")
+    assert eligible.status_code == 200, eligible.text
+    eligible_list = eligible.json()
+    assert isinstance(eligible_list, list)
+
+    # Pick an eligible user or create a new active user
+    new_user = User(
+        full_name="Grant Target User",
+        email=f"target-{uuid.uuid4()}@suredocs.example",
+        password_hash=hash_password("SecurePassword1!"),
+        role=UserRole.EMPLOYEE,
+        account_status=AccountStatus.ACTIVE,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(new_user)
+    db.commit()
+
+    expired_grant = client.post(
+        f"/api/admin/permissions/documents/{doc.id}/grants",
+        json={
+            "user_id": str(new_user.id),
+            "permission_level": "Read",
+            "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        },
+    )
+    assert expired_grant.status_code == 422
+
+    timezone_missing = client.post(
+        f"/api/admin/permissions/documents/{doc.id}/grants",
+        json={
+            "user_id": str(new_user.id),
+            "permission_level": "Read",
+            "expires_at": "2035-01-01T00:00:00",
+        },
+    )
+    assert timezone_missing.status_code == 422
+
+    # Grant Read + Download
+    grant_res = client.post(
+        f"/api/admin/permissions/documents/{doc.id}/grants",
+        json={"user_id": str(new_user.id), "permission_level": "Read + Download"},
+    )
+    assert grant_res.status_code == 200, grant_res.text
+    grant_data = grant_res.json()
+    assert grant_data["can_view"] is True
+    assert grant_data["can_download"] is True
+    assert grant_data["can_edit"] is False
+    assert grant_data["status"] == "Active"
+
+    # Verify audit log was recorded
+    audit = db.query(DocumentAuditLog).filter_by(
+        document_id_snapshot=doc.id,
+        target_user_id=new_user.id,
+        action_type="PERMISSION_GRANTED",
+    ).first()
+    assert audit is not None
+    assert audit.actor_user_id == active_admin.id
+    notification = db.query(Notification).filter_by(
+        recipient_user_id=new_user.id,
+        notification_type="ACCESS_GRANTED",
+    ).one()
+    assert notification.document_id == doc.id
+    assert notification.metadata_json["permission_id"] == str(grant_data["id"])
+
+
+def test_admin_permissions_authorization_gating(
+    client: TestClient,
+    active_employee: User,
+) -> None:
+    # 1. Unauthenticated request rejected
+    unauth = client.get("/api/admin/permissions/records")
+    assert unauth.status_code == 401
+
+    # 2. Non-admin employee rejected with 403
+    _login(client, active_employee.email, "SecureEmp1!")
+    forbidden = client.get("/api/admin/permissions/records")
+    assert forbidden.status_code == 403
