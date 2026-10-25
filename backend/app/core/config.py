@@ -40,8 +40,10 @@ DB_USERNAME: str = os.getenv("SUREDOCS_DB_USER", "suredocs_app")
 DB_HOST: str = os.getenv("SUREDOCS_DB_HOST", "127.0.0.1")
 DB_PORT: int = int(os.getenv("SUREDOCS_DB_PORT", "5432"))
 DB_NAME: str = os.getenv("SUREDOCS_DB_NAME", "suredocs")
-DB_PASSWORD: str = _read_secret_file("suredocs_app_password.txt")
-
+DB_PASSWORD: str = (
+    os.getenv("DB_PASSWORD")
+    or _read_secret_file("suredocs_app_password.txt")
+)
 # ---------------------------------------------------------------------------
 # Session / cookie settings
 # ---------------------------------------------------------------------------
