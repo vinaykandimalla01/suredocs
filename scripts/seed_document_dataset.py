@@ -30,7 +30,6 @@ from app.db.session import SessionLocal  # noqa: E402
 from app.models.documents import Document, DocumentVersion  # noqa: E402
 from app.models.user import User, UserRole  # noqa: E402
 from app.routers.documents import _FILE_TYPES, _validate_content  # noqa: E402
-from app.services.antivirus import scan_document_bytes  # noqa: E402
 from app.services.s3_storage import (  # noqa: E402
     StorageUnavailableError,
     delete_document_object,
@@ -517,9 +516,6 @@ def _run(args: argparse.Namespace) -> int:
     sources = _load_sources(root)
     items = _items(sources, args.target_count)
     source_hashes = {source.checksum for source in sources}
-
-    for source in sources:
-        scan_document_bytes(source.content)
 
     client = get_s3_client()
     with SessionLocal() as session:

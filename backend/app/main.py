@@ -14,7 +14,6 @@ from app.core.config import CORS_ORIGINS
 from app.routers.auth import router as auth_router
 from app.routers.access_requests import router as access_requests_router
 from app.routers.dashboard import router as dashboard_router
-from app.routers.document_scans import router as document_scans_router
 from app.routers.document_activity import router as document_activity_router
 from app.routers.documents import router as documents_router
 from app.routers.sharing_permissions import router as sharing_permissions_router
@@ -72,6 +71,5 @@ app.include_router(user_profile_router)
 app.include_router(document_activity_router)
 app.include_router(documents_router)
 app.include_router(sharing_permissions_router)
-app.include_router(document_scans_router)
 app.include_router(admin_permissions_router)
 app.include_router(admin_audit_router)

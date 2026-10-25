@@ -183,7 +183,6 @@ def test_access_request_approval_creates_scoped_edit_grant_and_notifications(
         "app.routers.documents.put_document",
         lambda key, body, *, content_type, checksum_sha256: "replacement-s3-version",
     )
-    monkeypatch.setattr("app.routers.documents.scan_document_bytes", lambda content: None)
     replacement = client.post(
         f"/api/documents/{document.id}/versions",
         files={"file": ("revised.pdf", b"%PDF-1.7\nrevised", "application/pdf")},

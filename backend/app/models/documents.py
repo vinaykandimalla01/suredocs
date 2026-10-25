@@ -437,7 +437,7 @@ class DocumentScan(Base):
     file_hash_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     scanner_name: Mapped[str] = mapped_column(
-        String(64), nullable=False, default="ClamAV", server_default=text("'ClamAV'"),
+        String(64), nullable=False, default="none", server_default=text("'none'"),
     )
     scanner_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     detection_name: Mapped[str | None] = mapped_column(String(255), nullable=True)

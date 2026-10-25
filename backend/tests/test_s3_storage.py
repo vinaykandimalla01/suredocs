@@ -84,12 +84,16 @@ def test_put_document_logs_head_error_and_cleans_up(monkeypatch, caplog):
     class FakeS3:
         def __init__(self):
             self.deleted = []
+            self.uploaded = []
+            self.verified = []
 
         def put_object(self, **kwargs):
+            self.uploaded.append(kwargs)
             assert kwargs["Bucket"] == S3_BUCKET
             return {}
 
         def head_object(self, **kwargs):
+            self.verified.append(kwargs)
             assert kwargs["Key"] == "documents/test"
             raise verification_error
 
@@ -106,7 +110,22 @@ def test_put_document_logs_head_error_and_cleans_up(monkeypatch, caplog):
     ) as exc_info:
         put_document("documents/test", BytesIO(b"abc"), content_type="text/plain", checksum_sha256="expected-checksum")
 
-    assert fake_s3.deleted == [{"Bucket": S3_BUCKET, "Key": "documents/test"}]
+    assert len(fake_s3.uploaded) == 1
+    assert fake_s3.verified == [
+        {
+            "Bucket": fake_s3.uploaded[0]["Bucket"],
+            "Key": fake_s3.uploaded[0]["Key"],
+            "ChecksumMode": "ENABLED",
+        }
+    ]
+    assert fake_s3.deleted == [
+        {
+            "Bucket": fake_s3.uploaded[0]["Bucket"],
+            "Key": fake_s3.uploaded[0]["Key"],
+        }
+    ]
+    assert fake_s3.uploaded[0]["Bucket"] == S3_BUCKET
+    assert fake_s3.uploaded[0]["Key"] == "documents/test"
     assert exc_info.value.__cause__ is verification_error
     assert "Error.Code=AccessDenied" in caplog.text
     assert "Error.Message=Head denied" in caplog.text
@@ -182,6 +201,44 @@ def test_put_document_cleanup_client_error_does_not_hide_verification_error(
     assert "must-not-be-logged" not in caplog.text
 
 
+def test_put_document_unexpected_cleanup_failure_does_not_hide_head_failure(
+    monkeypatch, caplog
+):
+    from botocore.exceptions import ClientError
+
+    verification_error = ClientError(
+        {
+            "Error": {"Code": "AccessDenied", "Message": "Head denied"},
+            "ResponseMetadata": {"HTTPStatusCode": 403},
+        },
+        "HeadObject",
+    )
+
+    class FakeS3:
+        def put_object(self, **kwargs):
+            return {"VersionId": "s3-version-123"}
+
+        def head_object(self, **kwargs):
+            raise verification_error
+
+        def delete_object(self, **kwargs):
+            raise RuntimeError("cleanup transport failed")
+
+    monkeypatch.setattr("app.services.s3_storage.get_s3_client", lambda: FakeS3())
+
+    with pytest.raises(StorageUnavailableError) as exc_info:
+        put_document(
+            "documents/test",
+            BytesIO(b"abc"),
+            content_type="text/plain",
+            checksum_sha256="expected-checksum",
+        )
+
+    assert exc_info.value.__cause__ is verification_error
+    assert "Error.Code=AccessDenied" in caplog.text
+    assert "S3 verification cleanup failed (RuntimeError)" in caplog.text
+
+
 @pytest.mark.parametrize(
     ("error_code", "message", "status_code"),
     [
@@ -198,6 +255,10 @@ def test_put_document_logs_safe_client_error_diagnostics(
     from botocore.exceptions import ClientError
 
     class FakeS3:
+        def __init__(self):
+            self.head_called = False
+            self.delete_called = False
+
         def put_object(self, **kwargs):
             raise ClientError(
                 {
@@ -214,7 +275,15 @@ def test_put_document_logs_safe_client_error_diagnostics(
                 "PutObject",
             )
 
-    monkeypatch.setattr("app.services.s3_storage.get_s3_client", lambda: FakeS3())
+        def head_object(self, **kwargs):
+            self.head_called = True
+
+        def delete_object(self, **kwargs):
+            self.delete_called = True
+
+    fake_s3 = FakeS3()
+
+    monkeypatch.setattr("app.services.s3_storage.get_s3_client", lambda: fake_s3)
     caplog.set_level(logging.ERROR, logger="app.services.s3_storage")
 
     with pytest.raises(
@@ -234,6 +303,8 @@ def test_put_document_logs_safe_client_error_diagnostics(
     assert f"ResponseMetadata.HTTPStatusCode={status_code}" in log_message
     assert "ResponseMetadata.RequestId=request-id-123" in log_message
     assert "operation_name=PutObject" in log_message
+    assert fake_s3.head_called is False
+    assert fake_s3.delete_called is False
     assert "must-not-be-logged" not in log_message
     assert "document-content-must-not-be-logged" not in log_message
 

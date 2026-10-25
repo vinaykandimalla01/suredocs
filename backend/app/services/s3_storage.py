@@ -104,7 +104,7 @@ def put_document(
                 cleanup_arguments["VersionId"] = version_id
             try:
                 client.delete_object(**cleanup_arguments)
-            except (BotoCoreError, ClientError, NoCredentialsError) as cleanup_exc:
+            except Exception as cleanup_exc:
                 if isinstance(cleanup_exc, ClientError):
                     _log_s3_client_error("verification cleanup", cleanup_exc)
                 else:

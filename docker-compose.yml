@@ -68,51 +68,12 @@ services:
       db:
         condition: service_healthy
 
-  clamav:
-    build:
-      context: ./backend/clamav
-    image: suredocs-clamav:1.5.4
-    restart: unless-stopped
-    stop_grace_period: 1m
-
-    ports:
-      - "127.0.0.1:3310:3310"
-
-    volumes:
-      - clamav_data:/var/lib/clamav
-
-    networks:
-      - suredocs_internal
-
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - clamdcheck.sh
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-    deploy:
-      resources:
-        limits:
-          memory: 2048M
-          cpus: "2.0"
-        reservations:
-          memory: 512M
-
-    security_opt:
-      - no-new-privileges:true
-
 volumes:
   postgres_data:
     name: suredocs_postgres18_data
 
   pgadmin_data:
     name: suredocs_pgadmin_data
-
-  clamav_data:
-    name: suredocs_clamav_data
 
 secrets:
   postgres_password:

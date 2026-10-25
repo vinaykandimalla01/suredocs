@@ -204,17 +204,17 @@ AWS_REGION: str = os.getenv("AWS_REGION") or os.getenv(
     "SUREDOCS_AWS_REGION", "ap-south-1"
 )
 AWS_ENDPOINT_URL_S3: str | None = os.getenv("AWS_ENDPOINT_URL_S3") or None
-S3_BUCKET: str = os.getenv(
-    "SUREDOCS_S3_BUCKET",
-    "assets" if AWS_ENDPOINT_URL_S3 else "suredocs-private-documents-dev",
+_configured_s3_bucket = os.getenv("SUREDOCS_S3_BUCKET")
+if IS_PRODUCTION and not _configured_s3_bucket:
+    raise RuntimeError(
+        "SUREDOCS_S3_BUCKET must name the existing private document bucket in production."
+    )
+S3_BUCKET: str = _configured_s3_bucket or (
+    "assets" if AWS_ENDPOINT_URL_S3 else "suredocs-private-documents-dev"
 )
 MAX_DOCUMENT_SIZE_BYTES: int = 50 * 1024 * 1024
-CLAMAV_HOST: str = os.getenv("SUREDOCS_CLAMAV_HOST", "127.0.0.1")
-CLAMAV_PORT: int = int(os.getenv("SUREDOCS_CLAMAV_PORT", "3310"))
-CLAMAV_TIMEOUT_SECONDS: float = float(
-    os.getenv("SUREDOCS_CLAMAV_TIMEOUT_SECONDS", "120")
-)
-CLAMAV_STREAM_CHUNK_BYTES: int = 64 * 1024
+
+
 
 # ---------------------------------------------------------------------------
 # Password policy

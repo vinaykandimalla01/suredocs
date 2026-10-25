@@ -9,14 +9,21 @@ from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from app.models.documents import Document, DocumentAuditLog, DocumentPermission, DocumentVersion
+from app.models.documents import (
+    Document,
+    DocumentAuditLog,
+    DocumentPermission,
+    DocumentScan,
+    DocumentVersion,
+)
 from app.models.user import User
 from app.routers.documents import _file_response, _response_stream, _validate_content
 from app.schemas.documents import PermissionGrantRequest
-from app.services.antivirus import MalwareDetectedError, ScannerUnavailableError
+
 from app.services.s3_storage import (
     StorageObjectNotFoundError,
     StorageUnavailableError,
@@ -241,8 +248,10 @@ def test_active_user_uploads_document_and_persists_s3_metadata(
 ) -> None:
     owner = active_employee if owner_fixture == "employee" else active_admin
     uploaded: dict[str, object] = {}
+    events: list[str] = []
 
     def fake_put(key, body, *, content_type, checksum_sha256):
+        events.append("s3")
         uploaded.update(
             key=key,
             bytes=body.read(),
@@ -252,7 +261,6 @@ def test_active_user_uploads_document_and_persists_s3_metadata(
         return "test-s3-version"
 
     monkeypatch.setattr("app.routers.documents.put_document", fake_put)
-    monkeypatch.setattr("app.routers.documents.scan_document_bytes", lambda content: None)
     _login(client, email, password)
     response = client.post(
         "/api/documents/upload",
@@ -276,6 +284,7 @@ def test_active_user_uploads_document_and_persists_s3_metadata(
     assert payload["latest_uploaded_version_number"] == 1
     assert payload["latest_uploaded_version_status"] == "AVAILABLE"
     assert uploaded["bytes"] == _PDF
+    assert events == ["s3"]
     version = db.execute(
         select(DocumentVersion).where(DocumentVersion.document_id == uuid.UUID(payload["id"]))
     ).scalar_one()
@@ -283,7 +292,6 @@ def test_active_user_uploads_document_and_persists_s3_metadata(
     assert version.original_filename == "agreement.pdf"
     assert version.size_bytes == len(_PDF)
     assert version.status == "AVAILABLE"
-    assert version.scan_completed_at is not None
     assert version.s3_version_id == "test-s3-version"
     assert version.checksum_sha256 == hashlib.sha256(_PDF).hexdigest()
 
@@ -330,72 +338,69 @@ def test_failed_s3_upload_never_marks_document_version_available(
     ).scalar_one_or_none() is not None
 
 
-def test_upload_with_unavailable_scanner_stays_pending_and_returns_accepted(
+def test_database_finalize_failure_compensates_clean_s3_upload(
     client: TestClient,
     db: Session,
     active_employee: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "app.routers.documents.put_document",
-        lambda key, body, *, content_type, checksum_sha256: "test-s3-version",
-    )
+    objects = {}
+    deleted_objects = []
 
-    def scanner_unavailable(content: bytes) -> None:
-        raise ScannerUnavailableError("scanner offline")
+    def fake_put(key, body, *, content_type, checksum_sha256):
+        objects[key] = body.read()
+        return "s3-version"
 
-    monkeypatch.setattr("app.routers.documents.scan_document_bytes", scanner_unavailable)
+    def fake_delete(key, version_id=None):
+        assert version_id == "s3-version"
+        deleted_objects.append(key)
+        objects.pop(key, None)
+
+    failed_finalization = False
+    original_commit = db.commit
+
+    def fail_scan_finalization_once():
+        nonlocal failed_finalization
+        if objects and not failed_finalization:
+            failed_finalization = True
+            raise SQLAlchemyError("simulated scan metadata commit failure")
+        original_commit()
+
+    monkeypatch.setattr(db, "commit", fail_scan_finalization_once)
+    monkeypatch.setattr("app.routers.documents.put_document", fake_put)
+    monkeypatch.setattr("app.routers.documents.delete_document_object", fake_delete)
     _login(client, "testemployee@suredocs.example", "SecureEmp1!")
+
     response = client.post(
         "/api/documents/upload",
-        files={"file": ("pending.pdf", _PDF, "application/pdf")},
+        files={"file": ("clean.pdf", _PDF, "application/pdf")},
     )
 
-    assert response.status_code == 202
-    assert response.json()["latest_uploaded_version_status"] == "PENDING_SCAN"
-    version = db.execute(
-        select(DocumentVersion)
-        .join(Document, Document.id == DocumentVersion.document_id)
-        .where(Document.owner_user_id == active_employee.id)
-        .order_by(DocumentVersion.created_at.desc())
-    ).scalars().first()
-    assert version is not None and version.status == "PENDING_SCAN"
-    assert version.scan_completed_at is None
+    assert response.status_code == 503
+    assert "No document was made available" in response.json()["detail"]
+    assert objects == {}
+    assert len(deleted_objects) == 1
 
 
-def test_upload_detected_as_malware_is_quarantined_and_not_published(
+def test_unauthenticated_upload_persists_no_document_metadata(
     client: TestClient,
     db: Session,
     active_employee: User,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "app.routers.documents.put_document",
-        lambda key, body, *, content_type, checksum_sha256: "test-s3-version",
-    )
+    before = db.execute(
+        select(Document).where(Document.owner_user_id == active_employee.id)
+    ).scalars().all()
 
-    def scanner_detects_malware(content: bytes) -> None:
-        raise MalwareDetectedError("detected")
-
-    monkeypatch.setattr("app.routers.documents.scan_document_bytes", scanner_detects_malware)
-    _login(client, "testemployee@suredocs.example", "SecureEmp1!")
     response = client.post(
         "/api/documents/upload",
-        files={"file": ("infected.pdf", _PDF, "application/pdf")},
+        files={"file": ("unauthorized.pdf", _PDF, "application/pdf")},
     )
 
-    assert response.status_code == 202
-    assert response.json()["latest_uploaded_version_status"] == "QUARANTINED"
-    version = db.execute(
-        select(DocumentVersion)
-        .join(Document, Document.id == DocumentVersion.document_id)
-        .where(Document.owner_user_id == active_employee.id)
-        .order_by(DocumentVersion.created_at.desc())
-    ).scalars().first()
-    assert version is not None and version.status == "QUARANTINED"
-    assert version.scan_completed_at is not None
-    document = db.get(Document, version.document_id)
-    assert document is not None and document.current_version_id is None
+    assert response.status_code in {401, 403}
+    after = db.execute(
+        select(Document).where(Document.owner_user_id == active_employee.id)
+    ).scalars().all()
+    assert len(after) == len(before)
 
 
 def test_view_grant_allows_view_but_not_download_and_admin_is_not_implicitly_authorized(
@@ -1006,7 +1011,6 @@ def test_replacing_content_adds_version_and_keeps_the_previous_version(
         return "replacement-s3-version"
 
     monkeypatch.setattr("app.routers.documents.put_document", fake_put)
-    monkeypatch.setattr("app.routers.documents.scan_document_bytes", lambda content: None)
     _login(client, "testemployee@suredocs.example", "SecureEmp1!")
     response = client.post(
         f"/api/documents/{document.id}/versions",
@@ -1030,7 +1034,6 @@ def test_replacing_content_adds_version_and_keeps_the_previous_version(
     old_version = db.get(DocumentVersion, original_version_id)
     assert old_version is not None and old_version.status == "AVAILABLE"
     assert new_version.status == "AVAILABLE"
-    assert new_version.scan_completed_at is not None
 
 
 def test_owner_soft_delete_retains_versions_and_records_audit(

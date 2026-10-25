@@ -22,7 +22,6 @@ The local seeding command below creates separate local-only demo accounts and ge
   <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white"></a>
   <a href="https://www.postgresql.org/"><img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-18-4169e1?logo=postgresql&logoColor=white"></a>
   <a href="https://www.docker.com/"><img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker&logoColor=white"></a>
-  <a href="https://www.clamav.net/"><img alt="ClamAV" src="https://img.shields.io/badge/ClamAV-Antivirus-d71920"></a>
   <a href="https://aws.amazon.com/s3/"><img alt="Amazon S3 compatible storage" src="https://img.shields.io/badge/Object%20storage-S3%20compatible-569a31?logo=amazons3&logoColor=white"></a>
 </p>
 
@@ -32,7 +31,6 @@ The local seeding command below creates separate local-only demo accounts and ge
 | API | Python, FastAPI, Pydantic |
 | Persistence | PostgreSQL, SQLAlchemy, Alembic |
 | Document storage | Private S3-compatible object storage (AWS SDK / Boto3) |
-| Upload security | ClamAV malware scanning |
 | Local services | Docker Compose |
 
 ## What the application does
@@ -42,17 +40,14 @@ The local seeding command below creates separate local-only demo accounts and ge
 - Lets document owners grant, change, expire, or revoke view, download, and edit permissions.
 - Supports employee access requests and owner decisions.
 - Records document and authentication activity for audit and security monitoring.
-- Scans uploaded content with ClamAV; uploads are not made available when a clean scan verdict cannot be confirmed.
 
 ## Application workflow
 
 1. A user signs in. The API verifies the account and creates an HTTP-only session cookie.
 2. The employee workspace lets the user find documents, upload a new document, or request access to another owner's document.
-3. The API validates the file and its metadata, records a pending version, stores the upload in private quarantine storage, and sends the content to ClamAV.
-4. A clean file is promoted from quarantine to trusted private object storage. Document metadata, version and scan state, and relevant audit events are stored in PostgreSQL.
-5. If a scan detects malware or cannot return a trustworthy verdict, the upload is not made available as a clean document; infected versions are marked quarantined and scanner failures remain pending.
-6. Owners manage grants directly or review access requests. Each document read or download is authorized against the current grant and recorded as appropriate.
-7. Administrators manage accounts, review audit activity, and monitor document scans and security events.
+3. The API validates the file format, size, checksum, and metadata, writes the file to private S3, and finalizes the version and audit state in PostgreSQL.
+4. Owners manage grants directly or review access requests. Each document read or download is authorized against the current grant and recorded as appropriate.
+5. Administrators manage accounts, review audit activity, and monitor security events.
 
 ### Architecture diagram
 
@@ -63,7 +58,6 @@ flowchart LR
     Browser -. local development /api proxy .-> API
     API --> Auth[Authentication and authorization]
     API --> DB[(PostgreSQL\nSQLAlchemy + Alembic)]
-    API --> Scan[ClamAV scanner]
     API --> Store[(Private S3-compatible\nobject storage)]
     API --> Audit[Audit and activity records]
     Audit --> DB
@@ -78,16 +72,13 @@ flowchart TD
     B --> C[FastAPI checks session, permission, file type, size, and content]
     C -->|Invalid or unauthorized| X[Reject request]
     C -->|Valid| D[Save pending document metadata and version]
-    D --> E[Store upload in private quarantine storage]
-    E --> F[ClamAV scans file bytes]
-    F -->|Infected or scanner unavailable| Y[Keep unavailable and record scan outcome]
-    F -->|Clean verdict| G[Promote to trusted private object storage]
-    G --> H[Finalize version, checksum, and audit state in PostgreSQL]
-    H --> I[Owner grants access or employee requests it]
-    I --> J[API records the decision and updates permission state]
-    J --> K[Authorized user requests view or download]
-    K --> L[API checks current permission and reads the private object]
-    L --> M[Return document content and record activity]
+    D --> E[Write to trusted private object storage]
+    E --> F[Finalize version, checksum, and audit state in PostgreSQL]
+    F --> G[Owner grants access or employee requests it]
+    G --> H[API records the decision and updates permission state]
+    H --> I[Authorized user requests view or download]
+    I --> J[API checks current permission and reads the private object]
+    J --> K[Return document content and record activity]
 ```
 
 ## Local setup (Windows PowerShell)
@@ -115,10 +106,10 @@ New-Item -ItemType Directory -Force .\secrets | Out-Null
 Copy-Item .\.env.example .\.env
 ```
 
-Start PostgreSQL and ClamAV:
+Start PostgreSQL:
 
 ```powershell
-docker compose up -d db clamav
+docker compose up -d db
 docker compose ps
 ```
 
@@ -170,6 +161,8 @@ Open [http://localhost:5173](http://localhost:5173). The local Vite setup proxie
 - `.env`, `.env.local`, and `secrets/` are local-only. Never commit environment files, credentials, or generated demo passwords.
 - For Neon, pull the PostgreSQL and Object Storage settings into the ignored `.env.local` file with `neon env pull --file .env.local --service postgres --service object-storage`. The backend uses `DATABASE_URL` for application traffic and `DATABASE_URL_UNPOOLED` for Alembic migrations. Migrations create/update the schema; they do not migrate users, documents, audit events, or stored objects.
 - For cross-site production frontends, set the backend's exact `SUREDOCS_CORS_ORIGINS`, a stable `SESSION_SECRET`, `SUREDOCS_SECURE_COOKIES=true`, and `SUREDOCS_COOKIE_SAMESITE=none`. Keep database and object-storage credentials in backend deployment settings only.
+- Production document uploads require `SUREDOCS_S3_BUCKET` to name the existing private bucket; the development-bucket fallback is intentionally unavailable in production. Uploaded bytes are verified in memory and written to `documents/<document-id>/versions/<version-id>/content` with integrity checks against the SHA-256 digest.
+- The runtime identity needs `s3:PutObject` for writes, `s3:GetObject` (and `s3:GetObjectVersion` for versioned objects) for `HeadObject`, and `s3:DeleteObject` (and `s3:DeleteObjectVersion` for versioned objects) for failed-verification cleanup. Scope object permissions to the existing private bucket's `documents/*` ARN and check the identity and bucket policies for explicit denies. No AWS policy is included or changed by this repository.
 - The optional bulk import tool is not run at startup. Preview before importing with `python scripts/bulk_import_documents.py --owner-email admin@example.com --dry-run`; see the script's `--help` output for the manifest and documents-root options.
 
 ## Checks
@@ -185,8 +178,5 @@ From `backend/` with the virtual environment active:
 
 ```powershell
 pytest
-pytest tests/test_clamav_e2e.py -v
 ```
-
-The end-to-end ClamAV tests require the scanner service and validate clean, infected, and unavailable-scanner behavior.
 

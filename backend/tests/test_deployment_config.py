@@ -76,11 +76,13 @@ def _production_environment() -> dict[str, str]:
         "SUREDOCS_ENVIRONMENT",
         "SUREDOCS_COOKIE_SAMESITE",
         "SUREDOCS_SECURE_COOKIES",
+        "SUREDOCS_S3_BUCKET",
         "VERCEL",
         "VERCEL_ENV",
     ):
         env.pop(name, None)
     env["VERCEL"] = "1"
+    env["SUREDOCS_S3_BUCKET"] = "suredocs-private-test"
     return env
 
 
@@ -102,6 +104,7 @@ def _run_backend_snippet(
 def test_production_app_imports_without_database_or_secret_files():
     env = _production_environment()
     env["SESSION_SECRET"] = "s" * 48
+    env["SUREDOCS_S3_BUCKET"] = "suredocs-private-production"
     result = _run_backend_snippet(
         "from fastapi.testclient import TestClient\n"
         "from app.main import app\n"
@@ -144,6 +147,7 @@ def test_cross_site_cookie_configuration_requires_secure_cookies():
 def test_production_cookie_defaults_support_cross_origin_session_requests():
     env = _production_environment()
     env["SESSION_SECRET"] = "s" * 48
+    env["SUREDOCS_S3_BUCKET"] = "suredocs-private-production"
     result = _run_backend_snippet(
         "from app.core.config import COOKIE_HTTPONLY, COOKIE_SAMESITE, COOKIE_SECURE\n"
         "assert COOKIE_HTTPONLY is True\n"
@@ -159,6 +163,7 @@ def test_production_cookie_defaults_support_cross_origin_session_requests():
 def test_production_rejects_cookie_settings_that_break_cross_origin_sessions():
     env = _production_environment()
     env["SESSION_SECRET"] = "s" * 48
+    env["SUREDOCS_S3_BUCKET"] = "suredocs-private-production"
     env["SUREDOCS_COOKIE_SAMESITE"] = "lax"
     env["SUREDOCS_SECURE_COOKIES"] = "false"
     result = _run_backend_snippet("from app.core.config import COOKIE_SAMESITE\n", env)
@@ -180,6 +185,21 @@ def test_local_cookie_defaults_remain_unchanged():
     )
     assert result.returncode == 0, result.stderr
     assert "local session cookie defaults preserved" in result.stdout
+
+
+def test_production_requires_explicit_private_bucket_and_never_defaults_to_dev_bucket():
+    env = _production_environment()
+    env["SESSION_SECRET"] = "s" * 48
+    env.pop("SUREDOCS_S3_BUCKET")
+    result = _run_backend_snippet(
+        "from app.core.config import S3_BUCKET\n",
+        env,
+    )
+    assert result.returncode != 0
+    assert "SUREDOCS_S3_BUCKET must name the existing private document bucket" in result.stderr
+
+
+
 
 
 def test_production_docs_route_redirects_to_existing_swagger_and_openapi():

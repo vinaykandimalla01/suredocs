@@ -43,7 +43,6 @@ from app.models.documents import (
     Document,
     DocumentAuditLog,
     DocumentPermission,
-    DocumentScan,
     DocumentVersion,
 )
 from app.models.user import AccountStatus, User, UserRole
@@ -74,17 +73,10 @@ from app.services.document_access import (
     require_owner,
     utc_now,
 )
-from app.services.antivirus import (
-    MalwareDetectedError,
-    ScannerUnavailableError,
-    get_scanner_version,
-    scan_document_bytes,
-)
 from app.services.notifications import add_notification
 from app.services.s3_storage import (
     StorageObjectNotFoundError,
     StorageUnavailableError,
-    copy_document_object,
     delete_document_object,
     get_document as get_s3_document,
     put_document,
@@ -540,27 +532,7 @@ def _make_pending_version(
     return version, version.checksum_sha256
 
 
-def _upload_failure(
-    db: Session,
-    request: Request,
-    document: Document,
-    version: DocumentVersion,
-    user: User,
-) -> None:
-    version.status = "FAILED"
-    record_audit(
-        db,
-        request,
-        actor_user_id=user.id,
-        action_type="UPLOAD_REJECTED",
-        result="FAILED",
-        document=document,
-        details={"version_id": str(version.id), "reason": "storage_failure"},
-    )
-    db.commit()
-
-
-async def _scan_and_publish_version(
+async def _store_and_publish_version(
     db: Session,
     request: Request,
     document: Document,
@@ -568,154 +540,123 @@ async def _scan_and_publish_version(
     user: User,
     content: bytes,
     *,
-    quarantine_key: str | None = None,
-    quarantine_s3_version_id: str | None = None,
-    content_type: str | None = None,
     checksum: str | None = None,
-) -> tuple[str, str | None]:
-    """Publish only a clean version to trusted storage; leave unavailable scans pending.
+    record_upload_success: bool = False,
+) -> str:
+    """Validate, store in S3, and publish a document version.
 
-    Returns (version_status, detection_name).
+    Returns the final version status.
     """
-    scan_started = utc_now()
-    scanner_version = await run_in_threadpool(get_scanner_version)
     checksum_val = checksum or version.checksum_sha256
+    storage_written = False
+    s3_version_id: str | None = None
+    previous_current_version_id = document.current_version_id
+    version_id = version.id
+    document_id = document.id
+    storage_key = version.storage_key
 
-    scan_record = DocumentScan(
-        document_id=document.id,
-        version_id=version.id,
-        scan_status="SCANNING",
-        original_filename=version.original_filename,
-        file_hash_sha256=checksum_val,
-        file_size_bytes=len(content),
-        scanner_name="ClamAV",
-        scanner_version=scanner_version,
-        scan_started_at=scan_started,
-    )
-    db.add(scan_record)
+    base64_sha256 = base64.b64encode(bytes.fromhex(checksum_val)).decode("ascii")
     try:
-        db.flush()
-    except SQLAlchemyError:
-        pass
-
-    detection_name: str | None = None
-    try:
-        await run_in_threadpool(scan_document_bytes, content)
-    except ScannerUnavailableError as exc:
-        scan_record.scan_status = "SCAN_FAILED"
-        scan_record.failure_reason = str(exc)
-        scan_record.scan_completed_at = utc_now()
-        version.status = "PENDING_SCAN"
-        verdict = "scanner_unavailable"
-        result = "FAILED"
-    except MalwareDetectedError as exc:
-        detection_name = getattr(exc, "detection_name", None) or "Malware detected"
-        scan_record.scan_status = "INFECTED"
-        scan_record.detection_name = detection_name
-        scan_record.scan_completed_at = utc_now()
-        version.status = "QUARANTINED"
-        version.scan_completed_at = utc_now()
-        verdict = "infected"
-        result = "FAILED"
-        if quarantine_key:
-            try:
-                await run_in_threadpool(
-                    delete_document_object,
-                    quarantine_key,
-                    quarantine_s3_version_id,
-                )
-            except Exception as del_exc:
-                logger.warning("Quarantine cleanup warning: %s", del_exc)
-    else:
-        # CLEAN: promote from quarantine to trusted document storage!
-        base64_sha256 = base64.b64encode(bytes.fromhex(checksum_val)).decode("ascii")
-        trusted_key = version.storage_key
-        try:
-            if quarantine_key and quarantine_key != trusted_key:
-                try:
-                    s3_ver = await run_in_threadpool(
-                        copy_document_object,
-                        quarantine_key,
-                        trusted_key,
-                        content_type=content_type or version.content_type,
-                        checksum_sha256=base64_sha256,
-                        source_version_id=quarantine_s3_version_id,
-                    )
-                except Exception:
-                    s3_ver = await run_in_threadpool(
-                        put_document,
-                        trusted_key,
-                        BytesIO(content),
-                        content_type=content_type or version.content_type,
-                        checksum_sha256=base64_sha256,
-                    )
-                try:
-                    await run_in_threadpool(
-                        delete_document_object,
-                        quarantine_key,
-                        quarantine_s3_version_id,
-                    )
-                except Exception as del_exc:
-                    logger.warning("Quarantine deletion warning: %s", del_exc)
-            else:
-                s3_ver = await run_in_threadpool(
-                    put_document,
-                    trusted_key,
-                    BytesIO(content),
-                    content_type=content_type or version.content_type,
-                    checksum_sha256=base64_sha256,
-                )
-            version.s3_version_id = s3_ver
-        except StorageUnavailableError as storage_exc:
-            logger.error("Failed to promote clean document to trusted storage: %s", storage_exc)
-            scan_record.scan_status = "SCAN_FAILED"
-            scan_record.failure_reason = "Promotion to trusted storage failed"
-            scan_record.scan_completed_at = utc_now()
-            version.status = "FAILED"
-            db.commit()
-            raise HTTPException(
-                status_code=503,
-                detail="The document could not be stored in trusted repository.",
-            ) from storage_exc
-
-        version.status = "AVAILABLE"
-        version.scan_completed_at = utc_now()
-        scan_record.scan_status = "CLEAN"
-        scan_record.scan_completed_at = utc_now()
-        current_version = (
-            db.get(DocumentVersion, document.current_version_id)
-            if document.current_version_id is not None
-            else None
+        s3_version_id = await run_in_threadpool(
+            put_document,
+            version.storage_key,
+            BytesIO(content),
+            content_type=version.content_type,
+            checksum_sha256=base64_sha256,
         )
-        if current_version is None or current_version.version_number < version.version_number:
-            document.current_version_id = version.id
-        verdict = "clean"
-        result = "SUCCESS"
+        storage_written = True
+        version.s3_version_id = s3_version_id
+        logger.info("Document stored in S3")
+    except StorageUnavailableError as storage_exc:
+        logger.error("Failed to store document: %s", storage_exc)
+        version.status = "FAILED"
+        record_audit(
+            db,
+            request,
+            actor_user_id=user.id,
+            action_type="UPLOAD_REJECTED",
+            result="FAILED",
+            document=document,
+            details={
+                "version_id": str(version.id),
+                "reason": "storage_failure",
+            },
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="The document could not be stored. Please retry later.",
+        ) from storage_exc
 
-    audit_details = {
-        "version_id": str(version.id),
-        "version_number": str(version.version_number),
-        "verdict": verdict,
-        "scanner": scanner_version,
-    }
-    if detection_name:
-        audit_details["detection"] = detection_name
-    record_audit(
-        db,
-        request,
-        actor_user_id=user.id,
-        action_type="DOCUMENT_SCAN_COMPLETED",
-        result=result,
-        document=document,
-        details=audit_details,
+    version.status = "AVAILABLE"
+    current_version = (
+        db.get(DocumentVersion, document.current_version_id)
+        if document.current_version_id is not None
+        else None
     )
+    if current_version is None or current_version.version_number < version.version_number:
+        document.current_version_id = version.id
+    if record_upload_success:
+        record_audit(
+            db,
+            request,
+            actor_user_id=user.id,
+            action_type="DOCUMENT_UPLOADED",
+            result="SUCCESS",
+            document=document,
+            details={
+                "version_id": str(version.id),
+                "version_number": str(version.version_number),
+            },
+        )
+
     try:
         db.commit()
     except SQLAlchemyError:
         db.rollback()
-        logger.exception("Could not persist document scan result for version %s", version.id)
-        return "PENDING_SCAN", None
-    return version.status, detection_name
+        logger.exception("Could not persist document version %s", version_id)
+        if storage_written:
+            try:
+                await run_in_threadpool(
+                    delete_document_object,
+                    storage_key,
+                    s3_version_id,
+                )
+            except Exception as cleanup_exc:
+                logger.error(
+                    "Upload compensation failed (%s)",
+                    type(cleanup_exc).__name__,
+                )
+        failed_version = db.get(DocumentVersion, version_id)
+        failed_document = db.get(Document, document_id)
+        if failed_version is not None:
+            failed_version.status = "FAILED"
+            failed_version.s3_version_id = None
+        if failed_document is not None:
+            failed_document.current_version_id = previous_current_version_id
+        if failed_document is not None:
+            record_audit(
+                db,
+                request,
+                actor_user_id=user.id,
+                action_type="UPLOAD_REJECTED",
+                result="FAILED",
+                document=failed_document,
+                details={
+                    "version_id": str(version_id),
+                    "reason": "finalize_failed",
+                },
+            )
+        try:
+            db.commit()
+        except SQLAlchemyError:
+            db.rollback()
+            logger.error("Could not persist failed document finalization")
+        raise HTTPException(
+            status_code=503,
+            detail="The upload could not be finalized. No document was made available.",
+        )
+    return version.status
 
 
 def _response_stream(s3_object: dict[str, Any], on_error=None):
@@ -937,8 +878,6 @@ async def upload_document(
         PurePosixPath(filename).suffix.lower().lstrip("."),
         content,
     )
-    version_id = version.id
-    object_key = version.storage_key
     try:
         db.commit()
         db.refresh(document)
@@ -950,102 +889,27 @@ async def upload_document(
             detail="Document metadata could not be initialized.",
         ) from exc
 
-    quarantine_key = f"documents/quarantine/{document.id}/versions/{version.id}/content"
-    try:
-        quarantine_s3_version_id = await run_in_threadpool(
-            put_document,
-            quarantine_key,
-            BytesIO(content),
-            content_type=content_type,
-            checksum_sha256=base64.b64encode(
-                bytes.fromhex(checksum)
-            ).decode("ascii"),
-        )
-    except StorageUnavailableError as exc:
-        _upload_failure(db, request, document, version, current_user)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    try:
-        version.status = "PENDING_SCAN"
-        document.updated_at = utc_now()
-        record_audit(
-            db,
-            request,
-            actor_user_id=current_user.id,
-            action_type="DOCUMENT_UPLOADED",
-            result="SUCCESS",
-            document=document,
-            details={
-                "version_id": str(version.id),
-                "version_number": 1,
-                "scan_status": "PENDING_SCAN",
-            },
-        )
-        db.commit()
-    except SQLAlchemyError as exc:
-        db.rollback()
-        try:
-            await run_in_threadpool(
-                delete_document_object,
-                quarantine_key,
-                quarantine_s3_version_id,
-            )
-        except StorageUnavailableError:
-            logger.error(
-                "Upload compensation was unsuccessful for document %s version %s",
-                document.id,
-                version.id,
-            )
-        failed_version = db.get(DocumentVersion, version_id)
-        if failed_version is not None:
-            failed_version.status = "FAILED"
-            failed_document = db.get(Document, document_id)
-            record_audit(
-                db,
-                request,
-                actor_user_id=current_user.id,
-                action_type="UPLOAD_REJECTED",
-                result="FAILED",
-                document=failed_document,
-                document_id=document_id,
-                details={"version_id": str(version_id), "reason": "database_finalize"},
-            )
-            try:
-                db.commit()
-            except SQLAlchemyError:
-                db.rollback()
-                logger.error("Could not mark failed document upload in PostgreSQL")
-        raise HTTPException(
-            status_code=503,
-            detail="The upload could not be finalized. Please retry.",
-        ) from exc
-    version_status, detection_name = await _scan_and_publish_version(
+    version_status = await _store_and_publish_version(
         db,
         request,
         document,
         version,
         current_user,
         content,
-        quarantine_key=quarantine_key,
-        quarantine_s3_version_id=quarantine_s3_version_id,
-        content_type=content_type,
         checksum=checksum,
+        record_upload_success=True,
     )
-    if version_status != "AVAILABLE":
-        response.status_code = status.HTTP_202_ACCEPTED
+    if version_status == "FAILED":
+        raise HTTPException(
+            status_code=503,
+            detail="Document storage is unavailable. No document was stored; please retry later.",
+        )
     db.refresh(document)
     db.expire(document, ["current_version"])
     db.refresh(version)
     document_response = _document_response(db, document, current_user)
     document_response.latest_uploaded_version_number = version.version_number
     document_response.latest_uploaded_version_status = version_status
-    if version_status == "AVAILABLE":
-        document_response.scan_message = "Document uploaded and security scan passed."
-    elif version_status == "QUARANTINED":
-        document_response.scan_message = "Upload blocked: the file failed the security scan."
-        document_response.detection_name = detection_name
-    elif version_status == "PENDING_SCAN":
-        document_response.scan_message = "Security scanning is temporarily unavailable. Please try again later."
     return document_response
 
 
@@ -1816,7 +1680,6 @@ async def replace_document_file(
         content,
     )
     version_id = version.id
-    object_key = version.storage_key
     try:
         db.commit()
         db.refresh(version)
@@ -1826,20 +1689,6 @@ async def replace_document_file(
             status_code=503,
             detail="Document version metadata could not be initialized.",
         ) from exc
-    quarantine_key = f"documents/quarantine/{document.id}/versions/{version.id}/content"
-    try:
-        quarantine_s3_version_id = await run_in_threadpool(
-            put_document,
-            quarantine_key,
-            BytesIO(content),
-            content_type=content_type,
-            checksum_sha256=base64.b64encode(
-                bytes.fromhex(checksum)
-            ).decode("ascii"),
-        )
-    except StorageUnavailableError as exc:
-        _upload_failure(db, request, document, version, current_user)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         version.status = "PENDING_SCAN"
         document.updated_at = utc_now()
@@ -1859,18 +1708,6 @@ async def replace_document_file(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        try:
-            await run_in_threadpool(
-                delete_document_object,
-                quarantine_key,
-                quarantine_s3_version_id,
-            )
-        except StorageUnavailableError:
-            logger.error(
-                "Version upload compensation was unsuccessful for document %s version %s",
-                document.id,
-                version_id,
-            )
         failed_version = db.get(DocumentVersion, version_id)
         if failed_version is not None:
             failed_version.status = "FAILED"
@@ -1898,33 +1735,26 @@ async def replace_document_file(
             status_code=503,
             detail="The replacement could not be finalized. Please retry.",
         ) from exc
-    version_status, detection_name = await _scan_and_publish_version(
+    version_status = await _store_and_publish_version(
         db,
         request,
         document,
         version,
         current_user,
         content,
-        quarantine_key=quarantine_key,
-        quarantine_s3_version_id=quarantine_s3_version_id,
-        content_type=content_type,
         checksum=checksum,
     )
-    if version_status != "AVAILABLE":
-        response.status_code = status.HTTP_202_ACCEPTED
+    if version_status == "FAILED":
+        raise HTTPException(
+            status_code=503,
+            detail="Document storage is unavailable. No document was stored; please retry later.",
+        )
     db.refresh(document)
     db.expire(document, ["current_version"])
     db.refresh(version)
     document_response = _document_response(db, document, current_user)
     document_response.latest_uploaded_version_number = version.version_number
     document_response.latest_uploaded_version_status = version_status
-    if version_status == "AVAILABLE":
-        document_response.scan_message = "Document uploaded and security scan passed."
-    elif version_status == "QUARANTINED":
-        document_response.scan_message = "Upload blocked: the file failed the security scan."
-        document_response.detection_name = detection_name
-    elif version_status == "PENDING_SCAN":
-        document_response.scan_message = "Security scanning is temporarily unavailable. Please try again later."
     return document_response
 
 
