@@ -7,8 +7,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: rgba(15, 23, 42, 0.55);
-  backdrop-filter: blur(2px);
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(3px);
   padding: 16px;
 }
 
@@ -21,11 +21,12 @@
   max-height: 94vh;
   background-color: #FFFFFF;
   border-radius: 14px;
-  border: 1px solid #E2E8F0;
-  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+  border: 1px solid #CBD5E1;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.28);
   overflow: hidden;
   font-family: inherit;
-  color: #172033;
+  color: #0F172A;
+  font-size: 13px;
 }
 
 /* Modal Header */
@@ -33,7 +34,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: 16px 22px;
   border-bottom: 1px solid #E2E8F0;
   background: #FFFFFF;
   flex-shrink: 0;
@@ -47,23 +48,23 @@
 }
 
 .doc-modal-file-icon {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #FFFFFF;
-  font-weight: 700;
-  font-size: 11px;
+  font-weight: 800;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
-.doc-modal-file-icon.pdf { background: #EF4444; }
-.doc-modal-file-icon.docx { background: #2563EB; }
-.doc-modal-file-icon.xlsx { background: #10B981; }
-.doc-modal-file-icon.pptx { background: #F97316; }
-.doc-modal-file-icon.file { background: #64748B; }
+.doc-modal-file-icon.pdf { background: #DC2626; }
+.doc-modal-file-icon.docx { background: #1D4ED8; }
+.doc-modal-file-icon.xlsx { background: #047857; }
+.doc-modal-file-icon.pptx { background: #EA580C; }
+.doc-modal-file-icon.file { background: #475569; }
 
 .doc-modal-title-wrap {
   display: flex;
@@ -72,8 +73,8 @@
 }
 
 .doc-modal-title {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 19px;
+  font-weight: 750;
   color: #0F172A;
   margin: 0;
   line-height: 1.25;
@@ -83,9 +84,10 @@
 }
 
 .doc-modal-subtitle {
-  font-size: 11px;
-  color: #64748B;
-  margin-top: 2px;
+  font-size: 12.5px;
+  color: #475569;
+  margin-top: 3px;
+  font-weight: 500;
 }
 
 .doc-modal-header-right {
@@ -95,12 +97,12 @@
 }
 
 .doc-modal-close-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 6px;
-  border: none;
+  border: 1px solid #CBD5E1;
   background: transparent;
-  color: #64748B;
+  color: #475569;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -130,53 +132,53 @@
 }
 
 .doc-modal-col-left {
-  padding: 16px 20px;
+  padding: 18px 22px;
   overflow-y: auto;
   border-right: 1px solid #E2E8F0;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.doc-modal-col-right {
-  padding: 16px 20px;
-  overflow-y: auto;
-  background: #FAFAFC;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
+.doc-modal-col-right {
+  padding: 18px 22px;
+  overflow-y: auto;
+  background: #F8FAFC;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
 /* Document Owner Card (Pale Blue Card) */
 .doc-owner-card {
   background: #EFF6FF;
-  border: 1px solid #DBEAFE;
+  border: 1px solid #BFDBFE;
   border-radius: 10px;
-  padding: 12px 14px;
+  padding: 14px 16px;
 }
 
 .doc-owner-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 9px;
 }
 
 .doc-owner-heading {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 700;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 750;
   color: #1E3A8A;
 }
 
 .doc-owner-badge {
   background: #DBEAFE;
   color: #1D4ED8;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
   border-radius: 4px;
 }
 
@@ -185,22 +187,22 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 14px;
 }
 
 .doc-owner-profile {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
 }
 
 .doc-owner-avatar {
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  background: #3B82F6;
+  background: #1D4ED8;
   color: #FFFFFF;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -208,23 +210,24 @@
 }
 
 .doc-owner-name {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 750;
   color: #0F172A;
   line-height: 1.2;
 }
 
 .doc-owner-meta-text {
-  font-size: 11px;
-  color: #475569;
-  margin-top: 1px;
+  font-size: 12px;
+  color: #334155;
+  margin-top: 2px;
+  font-weight: 500;
 }
 
 .doc-owner-stats-grid {
   display: flex;
   align-items: center;
-  gap: 16px;
-  font-size: 11px;
+  gap: 18px;
+  font-size: 12px;
 }
 
 .doc-owner-stat-col {
@@ -233,33 +236,35 @@
 }
 
 .doc-owner-stat-label {
-  color: #64748B;
-  font-size: 10px;
+  color: #475569;
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .doc-owner-stat-val {
   color: #0F172A;
-  font-weight: 600;
+  font-weight: 700;
   margin-top: 1px;
+  font-size: 13px;
 }
 
 /* Document Details Card */
 .doc-details-card {
   background: #FFFFFF;
-  border: 1px solid #E2E8F0;
+  border: 1px solid #CBD5E1;
   border-radius: 10px;
-  padding: 14px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+  padding: 15px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 
 .doc-details-card-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 700;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 750;
   color: #0F172A;
-  margin-bottom: 10px;
+  margin-bottom: 11px;
 }
 
 .doc-details-content-grid {
@@ -276,27 +281,27 @@
 
 .doc-details-file-block {
   display: flex;
-  gap: 10px;
+  gap: 11px;
 }
 
 .doc-details-file-icon {
-  width: 40px;
-  height: 48px;
-  border-radius: 6px;
+  width: 44px;
+  height: 52px;
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #FFFFFF;
-  font-weight: 700;
-  font-size: 12px;
+  font-weight: 800;
+  font-size: 13px;
   flex-shrink: 0;
 }
 
 .doc-details-meta-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
+  gap: 5px;
+  font-size: 12.5px;
 }
 
 .doc-details-row {
@@ -307,13 +312,16 @@
 }
 
 .doc-details-label {
-  color: #64748B;
+  color: #475569;
+  font-weight: 600;
+  font-size: 12px;
   white-space: nowrap;
 }
 
 .doc-details-val {
   color: #0F172A;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 13px;
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -321,19 +329,20 @@
 }
 
 .doc-details-desc-box {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #F1F5F9;
-  font-size: 11px;
-  color: #475569;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid #E2E8F0;
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.5;
 }
 
 /* Tabs */
 .doc-modal-tabs {
   display: flex;
   align-items: center;
-  gap: 16px;
-  border-bottom: 1px solid #E2E8F0;
+  gap: 18px;
+  border-bottom: 1px solid #CBD5E1;
   padding-bottom: 2px;
 }
 
@@ -341,12 +350,12 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 2px 8px;
+  padding: 8px 3px 10px;
   border: none;
   background: transparent;
-  font-size: 12px;
-  font-weight: 500;
-  color: #64748B;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
   cursor: pointer;
   position: relative;
   white-space: nowrap;
@@ -358,7 +367,7 @@
 
 .doc-modal-tab-btn.active {
   color: #1769F5;
-  font-weight: 600;
+  font-weight: 750;
 }
 
 .doc-modal-tab-btn.active::after {
@@ -367,7 +376,7 @@
   bottom: -3px;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
   background: #1769F5;
   border-radius: 2px;
 }
@@ -376,7 +385,7 @@
 .doc-shared-users-sec {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .doc-shared-users-header {
@@ -388,18 +397,18 @@
 }
 
 .doc-shared-users-title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 750;
   color: #0F172A;
 }
 
 .doc-shared-users-sub {
-  font-size: 11px;
-  color: #64748B;
+  font-size: 12.5px;
+  color: #475569;
 }
 
 .doc-shared-table-wrap {
-  border: 1px solid #E2E8F0;
+  border: 1px solid #CBD5E1;
   border-radius: 8px;
   overflow-x: auto;
   background: #FFFFFF;
@@ -408,24 +417,27 @@
 .doc-shared-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 12.5px;
   text-align: left;
 }
 
 .doc-shared-table th {
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: #F8FAFC;
-  border-bottom: 1px solid #E2E8F0;
-  font-size: 10px;
-  font-weight: 600;
-  color: #64748B;
+  border-bottom: 1px solid #CBD5E1;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #0F172A;
+  text-transform: uppercase;
+  letter-spacing: .3px;
   white-space: nowrap;
 }
 
 .doc-shared-table td {
-  padding: 8px 10px;
-  border-bottom: 1px solid #F1F5F9;
+  padding: 10px 12px;
+  border-bottom: 1px solid #E2E8F0;
   vertical-align: middle;
+  color: #0F172A;
 }
 
 .doc-shared-table tr:hover {
@@ -440,34 +452,34 @@
 .doc-pm-panel-header {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 9px;
 }
 
 .doc-pm-title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 750;
   color: #0F172A;
   line-height: 1.2;
 }
 
 .doc-pm-subtitle {
-  font-size: 11px;
-  color: #64748B;
-  margin-top: 2px;
+  font-size: 12.5px;
+  color: #475569;
+  margin-top: 3px;
 }
 
 /* Current Permission Overview Mini Cards */
 .doc-pm-overview-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 9px;
 }
 
 .doc-pm-mini-card {
   background: #FFFFFF;
-  border: 1px solid #E2E8F0;
+  border: 1px solid #CBD5E1;
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -480,61 +492,63 @@
 }
 
 .doc-pm-mini-val {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 800;
   color: #0F172A;
   line-height: 1;
 }
 
 .doc-pm-mini-label {
-  font-size: 10px;
-  color: #64748B;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #475569;
 }
 
 /* Add / Revoke User Access Form */
 .doc-pm-section-card {
   background: #FFFFFF;
-  border: 1px solid #E2E8F0;
+  border: 1px solid #CBD5E1;
   border-radius: 10px;
-  padding: 12px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 11px;
 }
 
 .doc-pm-sec-title {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13.5px;
+  font-weight: 750;
   color: #0F172A;
 }
 
 .doc-pm-input-field {
   width: 100%;
-  height: 32px;
-  padding: 0 10px;
+  height: 36px;
+  padding: 0 11px;
   border-radius: 6px;
-  border: 1px solid #E2E8F0;
+  border: 1px solid #CBD5E1;
   background: #FFFFFF;
-  font-size: 11px;
+  font-size: 12.5px;
   color: #0F172A;
 }
 
 .doc-pm-input-field:focus {
   outline: none;
   border-color: #1769F5;
+  box-shadow: 0 0 0 2px rgba(23, 105, 245, 0.12);
 }
 
 .doc-pm-btn-grant {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 34px;
+  gap: 7px;
+  height: 38px;
   border-radius: 7px;
   background: #1769F5;
   color: #FFFFFF;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   border: none;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -552,12 +566,12 @@
 /* Selected User Permission Card */
 .doc-pm-selected-user-card {
   background: #FFFFFF;
-  border: 1px solid #E2E8F0;
+  border: 1px solid #CBD5E1;
   border-radius: 10px;
-  padding: 12px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
 }
 
 .doc-pm-user-header {
@@ -569,17 +583,17 @@
 .doc-pm-user-summary {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
 }
 
 .doc-pm-user-details-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 11px;
+  gap: 7px;
+  font-size: 12.5px;
   margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px solid #F1F5F9;
+  padding-top: 7px;
+  border-top: 1px solid #E2E8F0;
 }
 
 .doc-pm-detail-row {
@@ -589,58 +603,62 @@
 }
 
 .doc-pm-detail-key {
-  color: #64748B;
+  color: #475569;
+  font-weight: 600;
+  font-size: 12px;
 }
 
 .doc-pm-detail-val {
   color: #0F172A;
-  font-weight: 500;
+  font-weight: 650;
+  font-size: 13px;
 }
 
 /* Revoke Permission Card (Red Accent) */
 .doc-pm-revoke-card {
   background: #FEF2F2;
-  border: 1px solid #FEE2E2;
+  border: 1px solid #FECACA;
   border-radius: 10px;
-  padding: 12px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
 }
 
 .doc-pm-revoke-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   color: #991B1B;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13.5px;
+  font-weight: 750;
 }
 
 .doc-pm-revoke-warning-text {
-  font-size: 10px;
+  font-size: 12px;
   color: #B91C1C;
-  line-height: 1.3;
+  line-height: 1.4;
 }
 
 .doc-pm-revoke-select {
   width: 100%;
-  height: 32px;
-  padding: 0 10px;
+  height: 36px;
+  padding: 0 11px;
   border-radius: 6px;
-  border: 1px solid #FECACA;
+  border: 1px solid #FCA5A5;
   background: #FFFFFF;
-  font-size: 11px;
+  font-size: 12.5px;
   color: #7F1D1D;
+  font-weight: 550;
 }
 
 .doc-pm-revoke-btn {
-  height: 32px;
+  height: 36px;
   border-radius: 6px;
   background: #EF4444;
   color: #FFFFFF;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 700;
   border: none;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -654,3 +672,4 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+

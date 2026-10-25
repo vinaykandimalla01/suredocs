@@ -456,6 +456,14 @@ def test_view_grant_allows_view_but_not_download_and_admin_is_not_implicitly_aut
 
     client.post("/api/auth/logout")
     _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+    shared = client.get("/api/documents/shared")
+    assert shared.status_code == 200
+    shared_document = next(
+        item for item in shared.json()["items"] if item["id"] == str(document.id)
+    )
+    assert shared_document["can_view"] is True
+    assert shared_document["can_download"] is False
+    assert shared_document["can_edit"] is False
     denied_edit = client.patch(
         f"/api/documents/{document.id}",
         json={"title": "Unauthorized edit", "classification": "CONFIDENTIAL"},
@@ -495,6 +503,34 @@ def test_view_grant_allows_view_but_not_download_and_admin_is_not_implicitly_aut
 
     client.post("/api/auth/logout")
     _login(client, "testemployee@suredocs.example", "SecureEmp1!")
+    download_grant = client.put(
+        f"/api/documents/{document.id}/permissions",
+        json={
+            "user_id": str(active_admin.id),
+            "can_view": True,
+            "can_download": True,
+        },
+    )
+    assert download_grant.status_code == 200, download_grant.text
+    client.post("/api/auth/logout")
+    _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+    downloaded = client.get(
+        f"/api/documents/{document.id}/versions/{document.current_version_id}/download"
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.content == _PDF
+    assert downloaded.headers["content-disposition"].startswith("attachment;")
+    assert "filename*=UTF-8''" in downloaded.headers["content-disposition"]
+    assert db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "DOCUMENT_DOWNLOADED",
+            DocumentAuditLog.result == "SUCCESS",
+        )
+    ).scalar_one().actor_user_id == active_admin.id
+
+    client.post("/api/auth/logout")
+    _login(client, "testemployee@suredocs.example", "SecureEmp1!")
     revoked = client.delete(
         f"/api/documents/{document.id}/permissions/{permission_id}"
     )
@@ -503,13 +539,15 @@ def test_view_grant_allows_view_but_not_download_and_admin_is_not_implicitly_aut
     _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
     revoked_view = client.get(f"/api/documents/{document.id}/view")
     assert revoked_view.status_code == 404
+    revoked_download = client.get(f"/api/documents/{document.id}/download")
+    assert revoked_download.status_code == 404
     revoked_render = client.post(
         f"/api/documents/{document.id}/preview-success"
         f"?version_id={document.current_version_id}",
         json={},
     )
     assert revoked_render.status_code == 404
-    assert len(fetched) == 1
+    assert len(fetched) == 2
 
 
 def test_admin_registry_filters_categories_and_aggregations(
@@ -923,6 +961,23 @@ def test_edit_grant_does_not_allow_non_owner_to_delete_document(
     )
     db.commit()
     _login(client, "testadmin@suredocs.example", "SecureAdmin1!")
+
+    updated = client.patch(
+        f"/api/documents/{document.id}",
+        json={
+            "title": "Shared editor update",
+            "classification": document.classification,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["title"] == "Shared editor update"
+    assert db.execute(
+        select(DocumentAuditLog).where(
+            DocumentAuditLog.document_id_snapshot == document.id,
+            DocumentAuditLog.action_type == "DOCUMENT_METADATA_UPDATED",
+            DocumentAuditLog.result == "SUCCESS",
+        )
+    ).scalar_one().actor_user_id == active_admin.id
 
     response = client.delete(f"/api/documents/{document.id}")
 

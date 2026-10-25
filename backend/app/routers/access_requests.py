@@ -273,10 +273,7 @@ async def access_request_summary(
         select(func.count(AccessRequest.id))
         .join(Document, Document.id == AccessRequest.document_id)
         .where(
-            or_(
-                AccessRequest.requester_user_id == user.id,
-                Document.owner_user_id == user.id,
-            ),
+            Document.owner_user_id == user.id,
             AccessRequest.status == "DENIED",
         )
     ) or 0

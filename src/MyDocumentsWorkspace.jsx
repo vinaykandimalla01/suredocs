@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { apiDelete, apiGet, apiPatch, apiPut } from './api.js'
+import { apiDelete, apiGet, apiGetFile, apiPatch, apiPut } from './api.js'
 import DocumentViewer from './DocumentViewer.jsx'
 import './MyDocumentsWorkspace.css'
 
@@ -108,6 +108,27 @@ function extensionOf(document) {
 
 function fileType(document) {
   return extensionOf(document).toUpperCase() || document?.content_type?.split('/').pop()?.toUpperCase() || 'FILE'
+}
+
+function sharedActionError(error) {
+  if (error.status === 401) return 'Your session has expired. Sign in again to continue.'
+  if (error.status === 403 || error.status === 404) return 'Access to this document has expired or been revoked.'
+  return error.message || 'The document action could not be completed.'
+}
+
+async function downloadSharedFile(document) {
+  const file = await apiGetFile(
+    `/api/documents/${encodeURIComponent(document.id)}/versions/${encodeURIComponent(document.current_version_id)}/download`,
+  )
+  if (file.blob.size === 0) throw new Error('The downloaded document is empty.')
+  const url = URL.createObjectURL(file.blob)
+  const link = window.document.createElement('a')
+  link.href = url
+  link.download = document.original_filename || document.title
+  window.document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function fileTone(extension) {
@@ -787,14 +808,22 @@ function modalModifiedTime(value) {
   return modalDateTime(value)
 }
 
-function SharedDocumentModal({ initialDocument, onClose }) {
+function SharedDocumentModal({ initialDocument, initialEdit = false, onAccessChanged, onClose, onDocumentChanged, onView }) {
   const [document, setDocument] = useState(initialDocument)
   const [versions, setVersions] = useState([])
   const [activity, setActivity] = useState([])
   const [activityError, setActivityError] = useState('')
+  const [actionError, setActionError] = useState('')
   const [tab, setTab] = useState('overview')
   const [dataLoading, setDataLoading] = useState(true)
   const [activeMenu, setActiveMenu] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState(initialDocument.title)
+  const [editDescription, setEditDescription] = useState(initialDocument.description || '')
+  const [editCategory, setEditCategory] = useState(initialDocument.category || '')
+  const [editClassification, setEditClassification] = useState(initialDocument.classification || 'INTERNAL')
+  const [editError, setEditError] = useState('')
+  const [editBusy, setEditBusy] = useState(false)
   const [activitySearch, setActivitySearch] = useState('')
   const [activityAction, setActivityAction] = useState(EMPTY_FILTER)
   const [activityUser, setActivityUser] = useState(EMPTY_FILTER)
@@ -812,14 +841,25 @@ function SharedDocumentModal({ initialDocument, onClose }) {
       apiGet(`/api/documents/${encodeURIComponent(initialDocument.id)}/audit`),
     ]).then(([detailResult, versionsResult, auditResult]) => {
       if (!active) return
-      if (detailResult.status === 'fulfilled') setDocument(detailResult.value)
+      if (detailResult.status === 'fulfilled') {
+        const detail = detailResult.value
+        setDocument(detail)
+        setEditTitle(detail.title)
+        setEditDescription(detail.description || '')
+        setEditCategory(detail.category || '')
+        setEditClassification(detail.classification || 'INTERNAL')
+        setEditing(Boolean(initialEdit && detail.can_view && detail.can_edit))
+      } else {
+        setDocument((current) => ({ ...current, can_view: false, can_download: false, can_edit: false }))
+        setActionError(sharedActionError(detailResult.reason))
+      }
       if (versionsResult.status === 'fulfilled') setVersions(versionsResult.value.items || [])
       if (auditResult.status === 'fulfilled') setActivity(auditResult.value.items || [])
       else setActivityError(auditResult.reason?.message || 'Activity could not be loaded.')
       setDataLoading(false)
     })
     return () => { active = false }
-  }, [initialDocument.id])
+  }, [initialDocument.id, initialEdit])
 
   useEffect(() => {
     const previousOverflow = window.document.body.style.overflow
@@ -839,7 +879,14 @@ function SharedDocumentModal({ initialDocument, onClose }) {
   const tags = uniqueTags([...(Array.isArray(document.custom_metadata?.tags) ? document.custom_metadata.tags : []), document.classification])
   const latestVersion = [...versions].sort((first, second) => second.version_number - first.version_number)[0]
   const uploadedAt = latestVersion?.uploaded_at || document.created_at
-  const canDownload = Boolean(document.can_download && document.current_version_id)
+  const hasAvailableVersion = Boolean(
+    document.status === 'ACTIVE' &&
+    document.current_version_id &&
+    document.current_version_status === 'AVAILABLE',
+  )
+  const canView = Boolean(document.can_view && hasAvailableVersion)
+  const canDownload = Boolean(document.can_download && canView)
+  const canEdit = Boolean(document.can_edit && canView)
   const category = document.category ? titleCase(document.category) : '—'
   const filteredActivity = activity.filter((event) => {
     const actor = event.actor_name || 'System'
@@ -857,6 +904,70 @@ function SharedDocumentModal({ initialDocument, onClose }) {
   const activityUsers = [...new Set(activity.map((event) => event.actor_name || 'System'))]
   const activityStatuses = [...new Set(activity.map((event) => event.result.toLowerCase()))]
 
+  async function refreshAccessState() {
+    try {
+      const latest = await apiGet(`/api/documents/${encodeURIComponent(document.id)}`)
+      setDocument(latest)
+      setEditTitle(latest.title)
+      setEditDescription(latest.description || '')
+      setEditCategory(latest.category || '')
+      setEditClassification(latest.classification || 'INTERNAL')
+      setEditing((current) => current && latest.can_view && latest.can_edit)
+    } catch (error) {
+      if (error.status === 401 || error.status === 403 || error.status === 404) {
+        setDocument((current) => ({ ...current, can_view: false, can_download: false, can_edit: false }))
+        setEditing(false)
+      } else {
+        setActionError(sharedActionError(error))
+      }
+    } finally {
+      onAccessChanged()
+    }
+  }
+
+  async function handleDownload() {
+    setActiveMenu('')
+    setActionError('')
+    try {
+      await downloadSharedFile(document)
+    } catch (error) {
+      setActionError(sharedActionError(error))
+      if (error.status === 401 || error.status === 403 || error.status === 404) {
+        await refreshAccessState()
+      }
+    }
+  }
+
+  async function saveMetadata(event) {
+    event.preventDefault()
+    setEditBusy(true)
+    setEditError('')
+    try {
+      const updated = await apiPatch(`/api/documents/${encodeURIComponent(document.id)}`, {
+        title: editTitle,
+        description: editDescription || null,
+        category: editCategory || null,
+        classification: editClassification,
+      })
+      setDocument(updated)
+      setEditing(false)
+      onDocumentChanged(updated)
+    } catch (error) {
+      setEditError(sharedActionError(error))
+      if (error.status === 401 || error.status === 403 || error.status === 404) {
+        await refreshAccessState()
+      }
+    } finally {
+      setEditBusy(false)
+    }
+  }
+
+  function openEdit() {
+    setEditError('')
+    setEditing(true)
+    setActiveMenu('')
+  }
+
   return (
     <div className="sd-modal-backdrop" onMouseDown={handleBackdrop}>
       <section aria-label={`Shared document details: ${document.title}`} aria-modal="true" className={`sd-modal sd-modal--shared-document sd-modal--shared-document-${tab}`} ref={modalRef} role="dialog" tabIndex={-1}>
@@ -873,9 +984,9 @@ function SharedDocumentModal({ initialDocument, onClose }) {
           <div className="sd-modal-header-actions">
             <Badge tone={document.status === 'ACTIVE' ? 'green' : 'slate'}>{titleCase(document.status)}</Badge>
             <ActionMenu label="Shared document actions" open={activeMenu === 'document'} onToggle={() => setActiveMenu((current) => current === 'document' ? '' : 'document')}>
-              {canDownload
-                ? <a href={`/api/documents/${encodeURIComponent(document.id)}/versions/${encodeURIComponent(document.current_version_id)}/download`} role="menuitem">Download document</a>
-                : <span className="sd-menu-note">Read access only</span>}
+              {canView && <button onClick={() => onView(document)} role="menuitem" type="button">Read / View Document</button>}
+              {canDownload && <button onClick={handleDownload} role="menuitem" type="button">Download Document</button>}
+              {canEdit && <button onClick={openEdit} role="menuitem" type="button">Edit Document</button>}
             </ActionMenu>
             <button aria-label="Close document details" className="sd-modal-close" onClick={onClose} type="button"><Icon name="close" /></button>
           </div>
@@ -923,7 +1034,7 @@ function SharedDocumentModal({ initialDocument, onClose }) {
                 <section className="sd-detail-card sd-shared-my-access-card">
                   <h3><span className="sd-section-icon"><Icon name="link" /></span>My Access &amp; Permissions</h3>
                   <div className="sd-shared-access-grid">
-                    <DetailField compact icon="eye" label="Permission" value={<Badge tone={document.can_download ? 'green' : 'blue'}>{document.can_download ? 'Download' : 'Read'}</Badge>} />
+                    <DetailField compact icon="eye" label="Permission" value={<Badge tone={document.can_download ? 'green' : 'blue'}>{permissionLabel(document)}</Badge>} />
                     <DetailField compact icon="calendar" label="Granted On" value={modalDateTime(document.permission_granted_at)} />
                     <DetailField compact icon="clock" label="Expires On" value={document.permission_expires_at ? modalDateTime(document.permission_expires_at).split(',').slice(0, 2).join(',') : 'No expiration'} />
                     <DetailField compact icon="users" label="Granted By" value={<span className="sd-shared-grantor"><strong>{document.permission_granted_by_name || document.owner_name || '—'}</strong><small>{document.permission_granted_by_email || document.owner_email || '—'}</small></span>} />
@@ -935,6 +1046,20 @@ function SharedDocumentModal({ initialDocument, onClose }) {
                 <h3><span className="sd-section-icon"><Icon name="tag" /></span>Tags</h3>
                 <div className="sd-shared-document-tag-list">{tags.length ? tags.map((tag) => <Badge key={tag} tone={tag.toLowerCase() === 'confidential' || tag.toLowerCase() === 'restricted' ? 'rose' : 'blue'}>{titleCase(tag)}</Badge>) : <span className="sd-shared-no-tags">No tags</span>}</div>
               </section>
+              {editing && canEdit && (
+                <form className="sd-edit-form" onSubmit={saveMetadata}>
+                  <div className="sd-edit-heading"><h3>Edit document metadata</h3><button aria-label="Close edit form" onClick={() => setEditing(false)} type="button"><Icon name="close" /></button></div>
+                  <div className="sd-edit-grid">
+                    <label>Document name<input maxLength={255} onChange={(event) => setEditTitle(event.target.value)} required value={editTitle} /></label>
+                    <label>Category<input maxLength={80} onChange={(event) => setEditCategory(event.target.value)} value={editCategory} /></label>
+                    <label>Classification<select onChange={(event) => setEditClassification(event.target.value)} value={editClassification}><option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select></label>
+                    <label>Description<textarea maxLength={10000} onChange={(event) => setEditDescription(event.target.value)} rows={2} value={editDescription} /></label>
+                  </div>
+                  {editError && <p className="sd-inline-error" role="alert">{editError}</p>}
+                  <div className="sd-edit-actions"><button className="sd-secondary-button" onClick={() => setEditing(false)} type="button">Cancel</button><button className="sd-primary-button" disabled={editBusy} type="submit">{editBusy ? 'Saving…' : 'Save changes'}</button></div>
+                </form>
+              )}
+              {actionError && <p className="sd-inline-error" role="alert">{actionError}</p>}
               {dataLoading && <p className="sd-modal-loading" role="status">Loading document details…</p>}
             </div>
           )}
@@ -995,27 +1120,53 @@ export function SharedWithMeWorkspace({ initialDocumentId = null, search: extern
   const [selectedDocument, setSelectedDocument] = useState(null)
   const [checkedIds, setCheckedIds] = useState([])
   const [openMenu, setOpenMenu] = useState('')
-  const pageSize = PAGE_SIZE
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
+  const [actionError, setActionError] = useState('')
+  const [viewerDocument, setViewerDocument] = useState(null)
+  const [initialEdit, setInitialEdit] = useState(false)
+  const tableCardRef = useRef(null)
+
+  useLayoutEffect(() => {
+    function updatePageSize() {
+      const top = tableCardRef.current?.getBoundingClientRect().top
+      if (top == null) return
+      const availableHeight = window.innerHeight - top - 72
+      setPageSize(Math.max(PAGE_SIZE, Math.floor(availableHeight / 35)))
+    }
+    updatePageSize()
+    window.addEventListener('resize', updatePageSize)
+    return () => window.removeEventListener('resize', updatePageSize)
+  }, [])
 
   useEffect(() => {
     let active = true
-    setLoading(true)
-    setError('')
-    Promise.allSettled([apiGet('/api/documents/shared'), apiGet('/api/documents/summary')]).then(([documentsResult, summaryResult]) => {
-      if (!active) return
-      if (documentsResult.status === 'fulfilled') {
-        setDocuments(documentsResult.value.items || [])
-        setTotal(documentsResult.value.total ?? documentsResult.value.items?.length ?? 0)
-      } else {
-        setError(documentsResult.reason?.message || 'Shared documents could not be loaded.')
-        setDocuments([])
-        setTotal(0)
-      }
-      setSummary(summaryResult.status === 'fulfilled' ? summaryResult.value : null)
-      setLoading(false)
-    })
-    return () => { active = false }
-  }, [])
+    let requestSequence = 0
+    function loadDocuments() {
+      const sequence = ++requestSequence
+      setLoading(true)
+      setError('')
+      Promise.allSettled([apiGet('/api/documents/shared'), apiGet('/api/documents/summary')]).then(([documentsResult, summaryResult]) => {
+        if (!active || sequence !== requestSequence) return
+        if (documentsResult.status === 'fulfilled') {
+          setDocuments(documentsResult.value.items || [])
+          setTotal(documentsResult.value.total ?? documentsResult.value.items?.length ?? 0)
+        } else {
+          setError(documentsResult.reason?.message || 'Shared documents could not be loaded.')
+          setDocuments([])
+          setTotal(0)
+        }
+        setSummary(summaryResult.status === 'fulfilled' ? summaryResult.value : null)
+        setLoading(false)
+      })
+    }
+    loadDocuments()
+    window.addEventListener('focus', loadDocuments)
+    return () => {
+      active = false
+      window.removeEventListener('focus', loadDocuments)
+    }
+  }, [refreshKey])
 
   const categories = useMemo(() => [...new Set(documents.map((document) => document.category).filter(Boolean))].sort(), [documents])
   const types = useMemo(() => [...new Set(documents.map(fileType))].sort(), [documents])
@@ -1050,6 +1201,7 @@ export function SharedWithMeWorkspace({ initialDocumentId = null, search: extern
   const onCloseModal = useCallback(() => {
     setSelectedId(null)
     setSelectedDocument(null)
+    setInitialEdit(false)
     if (new URLSearchParams(window.location.search).has('documentId')) {
       const url = new URL(window.location.href)
       url.searchParams.delete('documentId')
@@ -1063,7 +1215,34 @@ export function SharedWithMeWorkspace({ initialDocumentId = null, search: extern
     setPage(1)
   }
   function setFilter(setter, value) { setter(value); setPage(1) }
-  function openDetails(document) { setSelectedDocument(document); setSelectedId(document.id); setOpenMenu('') }
+  function openDetails(document, edit = false) {
+    setSelectedDocument(document)
+    setSelectedId(document.id)
+    setInitialEdit(edit)
+    setOpenMenu('')
+  }
+
+  function openViewer(document) {
+    setOpenMenu('')
+    onCloseModal()
+    setViewerDocument(document)
+  }
+
+  async function handleDownload(document) {
+    setActionError('')
+    try {
+      await downloadSharedFile(document)
+    } catch (downloadError) {
+      setActionError(sharedActionError(downloadError))
+      if (downloadError.status === 403 || downloadError.status === 404) {
+        setRefreshKey((value) => value + 1)
+      }
+    }
+  }
+
+  function handleDocumentChanged(updated) {
+    setDocuments((items) => items.map((item) => item.id === updated.id ? { ...item, ...updated } : item))
+  }
 
   return (
     <main className="sd-documents-page sd-shared-documents-page">
@@ -1072,6 +1251,7 @@ export function SharedWithMeWorkspace({ initialDocumentId = null, search: extern
       </div>
 
       {error && <p className="sd-page-alert" role="alert">{error}</p>}
+      {actionError && <p className="sd-page-alert" role="alert">{actionError}</p>}
 
       <section aria-label="Shared document summary" className="sd-document-summary sd-shared-summary">
         <SummaryCard color="purple" icon="file" title="Shared with Me" value={loading ? '…' : total} detail="Documents shared by others" />
@@ -1087,7 +1267,7 @@ export function SharedWithMeWorkspace({ initialDocumentId = null, search: extern
         <Dropdown label="Modified date" onChange={(value) => setFilter(setModified, value)} options={[{ value: 'newest', label: 'Last Modified' }, { value: 'oldest', label: 'Oldest First' }, { value: '7', label: 'Last 7 Days' }, { value: '30', label: 'Last 30 Days' }]} value={modified} />
       </section>
 
-      <section aria-label="Documents shared with me" className="sd-documents-table-card sd-shared-documents-table-card">
+      <section aria-label="Documents shared with me" className="sd-documents-table-card sd-shared-documents-table-card" ref={tableCardRef}>
         <div className="sd-documents-table-scroll">
           <table className="sd-data-table sd-shared-documents-table">
             <thead><tr>
@@ -1104,12 +1284,12 @@ export function SharedWithMeWorkspace({ initialDocumentId = null, search: extern
                 <td>{formatBytes(document.size_bytes)}</td>
                 <td>{shortModified(document.updated_at)}</td>
                 <td><Badge tone={document.status === 'ACTIVE' ? 'green' : documentStatusTone(document)}>{titleCase(document.status)}</Badge></td>
-                <td><Badge tone={document.can_download ? 'green' : 'blue'}>{document.can_download ? 'Download' : 'Read'}</Badge></td>
+                <td><Badge tone={document.can_download ? 'green' : 'blue'}>{permissionLabel(document)}</Badge></td>
                 <td><ActionMenu className="sd-row-action-anchor" label={`Actions for ${document.title}`} open={openMenu === document.id} onToggle={() => setOpenMenu((current) => current === document.id ? '' : document.id)}>
                   <button onClick={(event) => { event.stopPropagation(); openDetails(document) }} role="menuitem" type="button">Document details</button>
-                  {document.can_download && document.current_version_id
-                    ? <a href={`/api/documents/${encodeURIComponent(document.id)}/versions/${encodeURIComponent(document.current_version_id)}/download`} onClick={(event) => event.stopPropagation()} role="menuitem">Download document</a>
-                    : <span className="sd-menu-note">Read access only</span>}
+                  {document.can_view && document.status === 'ACTIVE' && document.current_version_status === 'AVAILABLE' && <button onClick={(event) => { event.stopPropagation(); openViewer(document) }} role="menuitem" type="button">Read / View Document</button>}
+                  {document.can_view && document.can_download && document.status === 'ACTIVE' && document.current_version_status === 'AVAILABLE' && <button onClick={(event) => { event.stopPropagation(); setOpenMenu(''); handleDownload(document) }} role="menuitem" type="button">Download Document</button>}
+                  {document.can_view && document.can_edit && document.status === 'ACTIVE' && document.current_version_status === 'AVAILABLE' && <button onClick={(event) => { event.stopPropagation(); openDetails(document, true) }} role="menuitem" type="button">Edit Document</button>}
                 </ActionMenu></td>
               </tr>)}
               {!loading && visibleDocuments.length === 0 && <tr><td className="sd-empty-cell" colSpan={10}>{error || (search || category !== EMPTY_FILTER || type !== EMPTY_FILTER || status !== EMPTY_FILTER ? 'No documents match these filters.' : 'No documents have been shared with you.')}</td></tr>}
@@ -1120,7 +1300,8 @@ export function SharedWithMeWorkspace({ initialDocumentId = null, search: extern
         <Pagination count={filteredDocuments.length} noun="documents" onPageChange={setPage} page={page} pageSize={pageSize} />
       </section>
 
-      {selected && <SharedDocumentModal initialDocument={selected} key={selected.id} onClose={onCloseModal} />}
+      {selected && <SharedDocumentModal initialDocument={selected} initialEdit={initialEdit} key={selected.id} onAccessChanged={() => setRefreshKey((value) => value + 1)} onClose={onCloseModal} onDocumentChanged={handleDocumentChanged} onView={openViewer} />}
+      {viewerDocument && <DocumentViewer document={viewerDocument} onClose={() => setViewerDocument(null)} />}
     </main>
   )
 }

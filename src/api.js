@@ -101,7 +101,9 @@ export async function apiPatch(path, body, { signal } = {}) {
   const data = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new Error(apiErrorMessage(data?.detail, `Request failed with status ${response.status}`))
+    const error = new Error(apiErrorMessage(data?.detail, `Request failed with status ${response.status}`))
+    error.status = response.status
+    throw error
   }
 
   return data

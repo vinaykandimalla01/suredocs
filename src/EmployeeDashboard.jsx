@@ -134,13 +134,35 @@ function EmployeeIcon({ name, className = 'h-4 w-4' }) {
   )
 }
 
-function EmployeeBrand() {
+const employeeSidebarPreferenceKey = 'suredocs.employee.sidebar.collapsed'
+
+function readEmployeeSidebarPreference() {
+  try {
+    return window.localStorage.getItem(employeeSidebarPreferenceKey) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function EmployeeBrand({ collapsed, open, onClose, onToggleCollapsed }) {
+  const toggleLabel = open ? 'Close navigation' : collapsed ? 'Expand sidebar' : 'Collapse sidebar'
+
   return (
-    <div className="employee-brand">
+    <div className={`employee-brand${collapsed ? ' employee-brand--collapsed' : ''}`}>
+      <button
+        aria-expanded={open || !collapsed}
+        aria-label={toggleLabel}
+        className="employee-sidebar-toggle"
+        onClick={open ? onClose : onToggleCollapsed}
+        title={toggleLabel}
+        type="button"
+      >
+        <EmployeeIcon className="h-5 w-5" name="menu" />
+      </button>
       <span className="employee-brand-mark">
         <EmployeeIcon className="h-5 w-5" name="security" />
       </span>
-      <span>
+      <span className="employee-brand-copy">
         <span className="employee-brand-name">SureDocs</span>
         <span className="employee-brand-caption">Secure Document Sharing</span>
       </span>
@@ -148,7 +170,7 @@ function EmployeeBrand() {
   )
 }
 
-function EmployeeSidebar({ pathname, open, onClose, pendingRequestCount }) {
+function EmployeeSidebar({ pathname, open, collapsed, onClose, onToggleCollapsed, pendingRequestCount }) {
   const isStorage = pathname === '/employee/storage' || pathname === '/employee/profile/storage'
   const isConnected = pathname === '/employee/connected' || pathname === '/employee/profile/connected' || pathname === '/employee/profile/connected-accounts'
   const isProfile = pathname.startsWith('/employee/profile') && !isStorage && !isConnected
@@ -173,7 +195,7 @@ function EmployeeSidebar({ pathname, open, onClose, pendingRequestCount }) {
 
   return (
     <aside aria-label="Employee sidebar" className={`employee-sidebar ${open ? 'employee-sidebar--open' : ''}`}>
-      <EmployeeBrand />
+      <EmployeeBrand collapsed={collapsed} onClose={onClose} onToggleCollapsed={onToggleCollapsed} open={open} />
       <nav aria-label="Employee navigation" className="employee-nav">
         {mainNav.map((item) => {
           const active = item.href === '/employee'
@@ -184,10 +206,12 @@ function EmployeeSidebar({ pathname, open, onClose, pendingRequestCount }) {
           return (
             <a
               aria-current={active ? 'page' : undefined}
+              aria-label={item.label}
               className={`employee-nav-link ${active ? 'employee-nav-link--active' : ''}`}
               href={item.href}
               key={item.href}
               onClick={onClose}
+              title={collapsed ? item.label : undefined}
             >
               <EmployeeIcon className="employee-nav-icon" name={item.icon} />
               <span className="employee-nav-label">{item.label}</span>
@@ -204,7 +228,7 @@ function EmployeeSidebar({ pathname, open, onClose, pendingRequestCount }) {
               ? true
               : item.href !== '/' && pathname.startsWith(item.href)
           return (
-            <a className={`employee-nav-link ${active ? 'employee-nav-link--active' : ''}`} href={item.href} key={item.href} onClick={onClose}>
+            <a aria-label={item.label} className={`employee-nav-link ${active ? 'employee-nav-link--active' : ''}`} href={item.href} key={item.href} onClick={onClose} title={collapsed ? item.label : undefined}>
               <EmployeeIcon className="employee-nav-icon" name={item.icon} />
               <span className="employee-nav-label">{item.label}</span>
             </a>
@@ -1237,12 +1261,21 @@ function EmployeeSectionPlaceholder({ user, pathname, notificationProps, notific
 
 export default function EmployeeDashboard({ user }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readEmployeeSidebarPreference)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [workspaceSearch, setWorkspaceSearch] = useState('')
   const [currentPath, setCurrentPath] = useState(() => window.location.pathname.replace(/\/$/, '') || '/employee')
   const [notificationRefresh, setNotificationRefresh] = useState(0)
   const [notificationState, setNotificationState] = useState({ items: [], unreadCount: 0, status: 'loading', error: '', actionError: '' })
   const [pendingRequestCounts, setPendingRequestCounts] = useState({ owned: null, mine: null, loading: true, error: false })
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(employeeSidebarPreferenceKey, String(sidebarCollapsed))
+    } catch {
+      // Sidebar preference persistence is optional when storage is unavailable.
+    }
+  }, [sidebarCollapsed])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -1416,8 +1449,8 @@ export default function EmployeeDashboard({ user }) {
   }, [])
 
   return (
-    <div className={`employee-shell${isDocumentsRoute ? ' employee-shell--documents' : ''}${currentPath === '/employee/upload' ? ' employee-shell--upload' : ''}${isAccessRequestsRoute ? ' employee-shell--access-requests' : ''}${isProfileRoute ? ' employee-shell--profile' : ''} ${sidebarOpen ? 'employee-shell--nav-open' : ''}`}>
-      <EmployeeSidebar pathname={currentPath} onClose={() => setSidebarOpen(false)} open={sidebarOpen} pendingRequestCount={pendingRequestCounts.owned} />
+    <div className={`employee-shell${isDocumentsRoute ? ' employee-shell--documents' : ''}${currentPath === '/employee/upload' ? ' employee-shell--upload' : ''}${isAccessRequestsRoute ? ' employee-shell--access-requests' : ''}${isProfileRoute ? ' employee-shell--profile' : ''}${sidebarCollapsed ? ' employee-shell--sidebar-collapsed' : ''} ${sidebarOpen ? 'employee-shell--nav-open' : ''}`}>
+      <EmployeeSidebar collapsed={sidebarCollapsed} onClose={() => setSidebarOpen(false)} onToggleCollapsed={() => setSidebarCollapsed((current) => !current)} open={sidebarOpen} pathname={currentPath} pendingRequestCount={pendingRequestCounts.owned} />
       {sidebarOpen && <button aria-label="Close navigation" className="employee-sidebar-backdrop" onClick={() => setSidebarOpen(false)} type="button" />}
       <div className="employee-shell-content">
         {isDashboard

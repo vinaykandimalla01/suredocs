@@ -249,3 +249,52 @@ def test_access_request_duplicate_deny_cancel_and_requester_scoping(
     assert owner_view.status_code == 200
     assert owner_view.json()["is_reviewer"] is True
     assert client.post(f"/api/access-requests/{second_id}/approve", json={}).status_code == 409
+
+
+def test_denied_summary_counts_only_requests_for_owned_documents(
+    client: TestClient,
+    db: Session,
+    active_admin: User,
+    active_employee: User,
+) -> None:
+    employee_document = _seed_document(db, active_employee)
+    admin_document = _seed_document(db, active_admin)
+    body = {
+        "requested_permissions": {"can_view": True},
+        "reason": "Need to review this document for the current assignment.",
+    }
+
+    _login(client, active_admin.email, "SecureAdmin1!")
+    employee_request = client.post(
+        "/api/access-requests",
+        json={**body, "document_id": str(employee_document.id)},
+    )
+    assert employee_request.status_code == 201, employee_request.text
+
+    _login(client, active_employee.email, "SecureEmp1!")
+    denied_by_employee = client.post(
+        f"/api/access-requests/{employee_request.json()['id']}/deny",
+        json={},
+    )
+    assert denied_by_employee.status_code == 200, denied_by_employee.text
+
+    employee_request_to_admin = client.post(
+        "/api/access-requests",
+        json={**body, "document_id": str(admin_document.id)},
+    )
+    assert employee_request_to_admin.status_code == 201, employee_request_to_admin.text
+
+    _login(client, active_admin.email, "SecureAdmin1!")
+    denied_by_admin = client.post(
+        f"/api/access-requests/{employee_request_to_admin.json()['id']}/deny",
+        json={},
+    )
+    assert denied_by_admin.status_code == 200, denied_by_admin.text
+
+    _login(client, active_employee.email, "SecureEmp1!")
+    summary = client.get("/api/access-requests/summary")
+    owned_denied = client.get("/api/access-requests?scope=owned&status=DENIED")
+    assert summary.status_code == 200
+    assert summary.json()["denied_requests"] == 1
+    assert owned_denied.status_code == 200
+    assert owned_denied.json()["total"] == 1

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { apiGet, apiPost } from './api.js'
+import { apiDelete, apiGet, apiPost } from './api.js'
 import './EmployeeAccessRequestsPage.css'
 
 const avatarColors = ['#2468f4', '#9060ee', '#f20b8a', '#762be0', '#06a7ce']
@@ -107,11 +107,14 @@ export default function EmployeeAccessRequestsPage() {
       let allItems = []
       let total = 0
       do {
-        const response = await apiGet('/api/access-requests?page=' + currentPage + '&page_size=100')
+        const response = await apiGet('/api/access-requests?scope=owned&page=' + currentPage + '&page_size=100')
         allItems = [...allItems, ...response.items]
         total = response.total
+        if (!response.items.length && allItems.length < total) {
+          throw new Error('Access requests could not be loaded completely.')
+        }
         currentPage += 1
-      } while (allItems.length < total && currentPage <= 100)
+      } while (allItems.length < total)
       setRequests(allItems.map(normalizeRequest))
       setLoadError('')
       try {
@@ -200,7 +203,6 @@ export default function EmployeeAccessRequestsPage() {
     setActionId(request.id)
     setNotice('')
     try {
-      const { apiDelete } = await import('./api.js')
       const updated = await apiDelete('/api/access-requests/' + encodeURIComponent(request.id))
       setRequests((current) => current.map((item) => item.id === request.id ? normalizeRequest(updated) : item))
       window.dispatchEvent(new Event('suredocs:access-requests-updated'))
