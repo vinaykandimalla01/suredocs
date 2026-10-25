@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import BinaryIO
 
 import boto3
@@ -29,6 +30,33 @@ def get_s3_client():
     if AWS_ENDPOINT_URL_S3:
         client_options["endpoint_url"] = AWS_ENDPOINT_URL_S3
     return boto3.client("s3", **client_options)
+
+
+def _log_s3_client_error(operation: str, exc: ClientError) -> None:
+    error = exc.response.get("Error", {})
+    metadata = exc.response.get("ResponseMetadata", {})
+    message = str(error.get("Message", "No error message returned."))
+    for credential_name in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_SECURITY_TOKEN",
+    ):
+        credential = os.environ.get(credential_name)
+        if credential:
+            message = message.replace(credential, "[REDACTED]")
+    message = message.replace("\r", " ").replace("\n", " ")
+    logger.error(
+        "S3 %s failed: Error.Code=%s Error.Message=%s "
+        "ResponseMetadata.HTTPStatusCode=%s ResponseMetadata.RequestId=%s "
+        "operation_name=%s",
+        operation,
+        error.get("Code", "unknown"),
+        message,
+        metadata.get("HTTPStatusCode", "unknown"),
+        metadata.get("RequestId", "unknown"),
+        exc.operation_name,
+    )
 
 
 def put_document(
@@ -88,7 +116,10 @@ def put_document(
             raise
         return version_id
     except (BotoCoreError, ClientError, NoCredentialsError) as exc:
-        logger.error("S3 document upload failed (%s)", type(exc).__name__)
+        if isinstance(exc, ClientError):
+            _log_s3_client_error("document upload", exc)
+        else:
+            logger.error("S3 document upload failed (%s)", type(exc).__name__)
         raise StorageUnavailableError(
             "Document storage is unavailable. The upload was not completed."
         ) from exc
