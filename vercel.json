@@ -23,6 +23,10 @@
     {
       "source": "/reset-password",
       "destination": "/index.html"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://suredocs-backned.vercel.app/api/:path*"
     }
   ]
 }

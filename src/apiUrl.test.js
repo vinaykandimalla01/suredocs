@@ -3,22 +3,19 @@ import test from 'node:test'
 
 import { getApiBaseUrl, resolveApiUrl } from './apiUrl.js'
 
-test('uses the configured production API origin', () => {
+test('uses the same-origin Vercel API proxy in production even if an external origin is configured', () => {
   const baseUrl = getApiBaseUrl({
     PROD: true,
     VITE_API_BASE_URL: 'https://suredocs-backned.vercel.app',
   })
 
-  assert.equal(
-    resolveApiUrl(baseUrl, '/api/auth/login'),
-    'https://suredocs-backned.vercel.app/api/auth/login',
-  )
+  assert.equal(resolveApiUrl(baseUrl, '/api/auth/login'), '/api/auth/login')
 })
 
-test('defaults to the SureDocs backend origin for production builds', () => {
+test('defaults to a same-origin API path for production builds', () => {
   assert.equal(
     resolveApiUrl(getApiBaseUrl({ PROD: true }), '/api/auth/health'),
-    'https://suredocs-backned.vercel.app/api/auth/health',
+    '/api/auth/health',
   )
 })
 

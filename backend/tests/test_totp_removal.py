@@ -44,6 +44,7 @@ def test_application_imports_without_totp_configuration():
         environment.pop(name, None)
     environment["VERCEL"] = "1"
     environment["SESSION_SECRET"] = "test-session-secret-that-is-at-least-32-chars"
+    environment["SUREDOCS_S3_BUCKET"] = "suredocs-private-test"
 
     result = subprocess.run(
         [

@@ -85,6 +85,27 @@ function DashboardLoading() {
   )
 }
 
+function SessionRestoreError({ message, onRetry, onBack }) {
+  return (
+    <main className="login-page">
+      <BrandingSection label="WORKSPACE / SESSION CHECK" />
+      <section className="login-form-panel">
+        <div className="login-form-content">
+          <h1>We couldn’t verify your session</h1>
+          <p className="login-form-subtitle" role="alert">{message}</p>
+          <button className="login-submit" onClick={onRetry} type="button">
+            Retry connection
+          </button>
+          <button className="login-recovery-back" onClick={onBack} type="button">
+            Back to sign in
+          </button>
+        </div>
+        <LoginFooter />
+      </section>
+    </main>
+  )
+}
+
 function LoginField({ id, label, type, placeholder, value, onChange, error, trailing }) {
   return (
     <div className="login-field">
@@ -244,13 +265,13 @@ async function apiLogout() {
 // Login form — preserves existing layout and design
 // ---------------------------------------------------------------------------
 
-function LoginForm({ onLogin }) {
+function LoginForm({ onLogin, initialNotice = '' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [rememberMe, setRememberMe] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState(initialNotice)
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit(event) {
@@ -590,10 +611,14 @@ function LoginFooter() {
 function App() {
   const [user, setUser] = useState(null)       // authenticated user from /api/auth/me
   const [checking, setChecking] = useState(true) // initial session check in progress
+  const [sessionRestoreError, setSessionRestoreError] = useState('')
+  const [loginNotice, setLoginNotice] = useState('')
+  const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0)
   const [path, setPath] = useState(window.location.pathname)
   const sessionCheckRef = useRef(null)
+  const sessionExpiredRef = useRef(false)
 
-  // On mount, validate the existing session cookie
+  // Restore the server-side session from its HttpOnly cookie.
   useEffect(() => {
     let cancelled = false
     const controller = new AbortController()
@@ -605,10 +630,24 @@ function App() {
 
     apiGetMe({ signal: controller.signal })
       .then((u) => {
-        if (!cancelled) setUser(u)
+        if (!cancelled) {
+          setUser(u)
+          setSessionRestoreError('')
+        }
       })
-      .catch(() => {
-        if (!cancelled) setUser(null)
+      .catch((error) => {
+        if (cancelled) return
+        setUser(null)
+        if (error.status === 401) {
+          setSessionRestoreError('')
+          return
+        }
+        console.error('[SureDocs] Session restoration failed', {
+          status: error.status ?? 'network_or_cors',
+        })
+        setSessionRestoreError(error.status === 403
+          ? 'This account is not allowed to start a session. Contact your administrator.'
+          : 'SureDocs could not reach the session service. Check your connection and try again.')
       })
       .finally(() => {
         if (!cancelled) setChecking(false)
@@ -619,7 +658,23 @@ function App() {
         sessionCheckRef.current = null
       }
     }
-  }, [])
+  }, [sessionCheckAttempt])
+
+  // A 401 from any protected API means the server session is unavailable.
+  // Ignore further 401s after the first one so concurrent requests redirect once.
+  useEffect(() => {
+    if (!user) return undefined
+    function onUnauthorized() {
+      if (sessionExpiredRef.current) return
+      sessionExpiredRef.current = true
+      setUser(null)
+      setLoginNotice('Your session has expired. Sign in again to continue.')
+      window.history.replaceState(null, '', '/')
+      setPath('/')
+    }
+    window.addEventListener('suredocs:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('suredocs:unauthorized', onUnauthorized)
+  }, [user])
 
   // Listen for popstate (browser back/forward) to re-render
   useEffect(() => {
@@ -651,6 +706,9 @@ function App() {
   function handleLogin(authenticatedUser) {
     sessionCheckRef.current?.()
     sessionCheckRef.current = null
+    sessionExpiredRef.current = false
+    setSessionRestoreError('')
+    setLoginNotice('')
     setChecking(false)
     setUser(authenticatedUser)
     const target = authenticatedUser.role === 'ADMIN' ? '/admin' : '/employee'
@@ -658,10 +716,32 @@ function App() {
     setPath(target)
   }
 
+  function retrySessionRestore() {
+    setChecking(true)
+    setSessionRestoreError('')
+    setSessionCheckAttempt((attempt) => attempt + 1)
+  }
+
+  function returnToSignIn() {
+    setSessionRestoreError('')
+    window.history.replaceState(null, '', '/')
+    setPath('/')
+  }
+
   // Keep protected routes gated until the existing session cookie is checked.
   // The public sign-in screen can render while this request runs in the background.
   if (checking && (path.startsWith('/admin') || path.startsWith('/employee'))) {
     return <DashboardLoading />
+  }
+
+  if (sessionRestoreError && (path.startsWith('/admin') || path.startsWith('/employee'))) {
+    return (
+      <SessionRestoreError
+        message={sessionRestoreError}
+        onBack={returnToSignIn}
+        onRetry={retrySessionRestore}
+      />
+    )
   }
 
   // Protected admin routes
@@ -690,7 +770,7 @@ function App() {
       return (
         <main className="login-page">
           <BrandingSection />
-          <LoginForm onLogin={handleLogin} />
+          <LoginForm initialNotice={loginNotice} onLogin={handleLogin} />
         </main>
       )
     }
@@ -716,7 +796,7 @@ function App() {
       return (
         <main className="login-page">
           <BrandingSection />
-          <LoginForm onLogin={handleLogin} />
+          <LoginForm initialNotice={loginNotice} onLogin={handleLogin} />
         </main>
       )
     }
@@ -749,7 +829,7 @@ function App() {
   return (
     <main className="login-page">
       <BrandingSection />
-      <LoginForm onLogin={handleLogin} />
+      <LoginForm initialNotice={loginNotice} onLogin={handleLogin} />
     </main>
   )
 }

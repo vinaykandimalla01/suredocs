@@ -1,10 +1,10 @@
-const PRODUCTION_API_BASE_URL = 'https://suredocs-backned.vercel.app'
-
 export function getApiBaseUrl(env = {}) {
   const configuredBaseUrl = typeof env.VITE_API_BASE_URL === 'string'
     ? env.VITE_API_BASE_URL.trim()
     : ''
-  const baseUrl = configuredBaseUrl || (env.PROD ? PRODUCTION_API_BASE_URL : '')
+  // Production routes /api through the frontend's Vercel deployment so the
+  // session cookie stays first-party in every browser.
+  const baseUrl = env.PROD ? '' : configuredBaseUrl
 
   return baseUrl.replace(/\/+$/, '').replace(/\/api$/i, '')
 }

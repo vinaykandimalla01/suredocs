@@ -16,11 +16,12 @@ test('Vercel serves the SPA entry point for existing protected route prefixes', 
   assert.equal(rewrites.get('/reset-password'), '/index.html')
 })
 
-test('Vercel does not rewrite API paths to the SPA entry point', () => {
-  assert.equal(
-    config.rewrites.some(({ source, destination }) =>
-      source.startsWith('/api') || (source === '/:path*' && destination === '/index.html'),
-    ),
-    false,
-  )
+test('Vercel proxies API paths through the app origin to the production backend', () => {
+  const apiRewrite = config.rewrites.find(({ source }) => source === '/api/:path*')
+
+  assert.deepEqual(apiRewrite, {
+    source: '/api/:path*',
+    destination: 'https://suredocs-backned.vercel.app/api/:path*',
+  })
+  assert.notEqual(apiRewrite.destination, '/index.html')
 })

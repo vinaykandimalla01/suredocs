@@ -141,34 +141,33 @@ def test_cross_site_cookie_configuration_requires_secure_cookies():
         insecure_env,
     )
     assert insecure_result.returncode != 0
-    assert "requires SUREDOCS_SECURE_COOKIES=true" in insecure_result.stderr
+    assert "Production session cookies require SUREDOCS_SECURE_COOKIES=true" in insecure_result.stderr
 
 
-def test_production_cookie_defaults_support_cross_origin_session_requests():
+def test_production_cookie_defaults_support_same_origin_session_requests():
     env = _production_environment()
     env["SESSION_SECRET"] = "s" * 48
     env["SUREDOCS_S3_BUCKET"] = "suredocs-private-production"
     result = _run_backend_snippet(
         "from app.core.config import COOKIE_HTTPONLY, COOKIE_SAMESITE, COOKIE_SECURE\n"
         "assert COOKIE_HTTPONLY is True\n"
-        "assert COOKIE_SAMESITE == 'none'\n"
+        "assert COOKIE_SAMESITE == 'lax'\n"
         "assert COOKIE_SECURE is True\n"
-        "print('production session cookies default to HttpOnly, SameSite=None, Secure')\n",
+        "print('production session cookies default to HttpOnly, SameSite=Lax, Secure')\n",
         env,
     )
     assert result.returncode == 0, result.stderr
-    assert "production session cookies default to HttpOnly, SameSite=None, Secure" in result.stdout
+    assert "production session cookies default to HttpOnly, SameSite=Lax, Secure" in result.stdout
 
 
-def test_production_rejects_cookie_settings_that_break_cross_origin_sessions():
+def test_production_requires_secure_cookies_for_same_origin_sessions():
     env = _production_environment()
     env["SESSION_SECRET"] = "s" * 48
     env["SUREDOCS_S3_BUCKET"] = "suredocs-private-production"
-    env["SUREDOCS_COOKIE_SAMESITE"] = "lax"
     env["SUREDOCS_SECURE_COOKIES"] = "false"
     result = _run_backend_snippet("from app.core.config import COOKIE_SAMESITE\n", env)
     assert result.returncode != 0
-    assert "Production cross-origin session cookies require" in result.stderr
+    assert "Production session cookies require SUREDOCS_SECURE_COOKIES=true" in result.stderr
 
 
 def test_local_cookie_defaults_remain_unchanged():

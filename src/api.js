@@ -34,6 +34,15 @@ export function apiErrorMessage(detail, fallback = 'Request failed') {
   return fallback
 }
 
+function apiResponseError(data, status) {
+  const error = new Error(apiErrorMessage(data?.detail, `Request failed with status ${status}`))
+  error.status = status
+  if (status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('suredocs:unauthorized'))
+  }
+  return error
+}
+
 export async function apiGet(path, { signal } = {}) {
   const response = await fetchApi(path, {
     credentials: 'include',
@@ -42,9 +51,7 @@ export async function apiGet(path, { signal } = {}) {
   const data = await response.json().catch(() => null)
 
   if (!response.ok) {
-    const error = new Error(apiErrorMessage(data?.detail, `Request failed with status ${response.status}`))
-    error.status = response.status
-    throw error
+    throw apiResponseError(data, response.status)
   }
 
   return data
@@ -58,9 +65,7 @@ export async function apiGetFile(path, { signal } = {}) {
 
   if (!response.ok) {
     const data = await response.json().catch(() => null)
-    const error = new Error(apiErrorMessage(data?.detail, `Request failed with status ${response.status}`))
-    error.status = response.status
-    throw error
+    throw apiResponseError(data, response.status)
   }
 
   return {
@@ -80,9 +85,7 @@ export async function apiPost(path, body, { signal } = {}) {
   const data = await response.json().catch(() => null)
 
   if (!response.ok) {
-    const error = new Error(apiErrorMessage(data?.detail, `Request failed with status ${response.status}`))
-    error.status = response.status
-    throw error
+    throw apiResponseError(data, response.status)
   }
 
   return data
@@ -99,9 +102,7 @@ export async function apiPatch(path, body, { signal } = {}) {
   const data = await response.json().catch(() => null)
 
   if (!response.ok) {
-    const error = new Error(apiErrorMessage(data?.detail, `Request failed with status ${response.status}`))
-    error.status = response.status
-    throw error
+    throw apiResponseError(data, response.status)
   }
 
   return data
@@ -118,7 +119,7 @@ export async function apiPut(path, body, { signal } = {}) {
   const data = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new Error(apiErrorMessage(data?.detail, `Request failed with status ${response.status}`))
+    throw apiResponseError(data, response.status)
   }
 
   return data
@@ -136,7 +137,7 @@ export async function apiDelete(path, { body, signal } = {}) {
   })
   if (!response.ok) {
     const data = await response.json().catch(() => null)
-    throw new Error(apiErrorMessage(data?.detail, `Request failed with status ${response.status}`))
+    throw apiResponseError(data, response.status)
   }
 }
 
@@ -159,7 +160,7 @@ export function apiUpload(path, body, { onProgress, method = 'POST' } = {}) {
         }
       })()
       if (request.status < 200 || request.status >= 300) {
-        reject(new Error(apiErrorMessage(data?.detail, `Request failed with status ${request.status}`)))
+        reject(apiResponseError(data, request.status))
         return
       }
       resolve(data)

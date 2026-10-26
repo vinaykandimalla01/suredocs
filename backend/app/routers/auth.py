@@ -596,7 +596,11 @@ async def health_check(
         from sqlalchemy import text
         db.execute(text("SELECT 1"))
         db_status = "connected"
-    except Exception:
+    except Exception as exc:
+        logger.error(
+            "Database health check failed error_type=%s",
+            type(exc).__name__,
+        )
         db_status = "unavailable"
 
     return HealthResponse(status="ok", database=db_status)

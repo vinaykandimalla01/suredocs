@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
@@ -36,6 +36,30 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
 )
+
+
+@app.middleware("http")
+async def log_api_server_failures(request: Request, call_next):
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        if request.url.path.startswith("/api/"):
+            logging.getLogger("suredocs.api").error(
+                "API request failed method=%s path=%s status=500 error_type=%s",
+                request.method,
+                request.url.path,
+                type(exc).__name__,
+            )
+        raise
+
+    if request.url.path.startswith("/api/") and response.status_code >= 500:
+        logging.getLogger("suredocs.api").error(
+            "API request failed method=%s path=%s status=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+        )
+    return response
 
 
 @app.get("/docs", include_in_schema=False)

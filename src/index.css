@@ -524,6 +524,14 @@ input {
   text-underline-offset: 2px;
 }
 
+button.login-recovery-back {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
 .login-recovery-security,
 .login-recovery-confirmation {
   display: flex;
